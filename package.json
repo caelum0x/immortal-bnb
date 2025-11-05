@@ -1,5 +1,8 @@
 {
-  
+  "name": "immortal-ai-trading-bot",
+  "version": "1.0.0",
+  "description": "An autonomous AI trading agent for BNB Chain with immortal memory storage on BNB Greenfield",
+  "main": "src/index.ts",
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
@@ -15,10 +18,16 @@
     "blockchain",
     "defi",
     "autonomous",
-    "pancakeswap"
+    "pancakeswap",
+    "greenfield",
+    "immortal-memory"
   ],
   "author": "arhansubasi0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caelum0x/immortal-bnb"
+  },
   "dependencies": {
     "ethers": "^6.13.4",
     "@pancakeswap/sdk": "^5.7.0",
@@ -29,6 +38,19 @@
     "winston": "^3.14.2",
     "@openrouter/ai-sdk-provider": "^1.2.0",
     "ai": "^5.0.81",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "long": "^5.2.3"
   },
+  "optionalDependencies": {
+    "wormhole-sdk": "^0.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  }
  

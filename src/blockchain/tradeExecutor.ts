@@ -47,27 +47,54 @@ let wallet: ethers.Wallet;
 let routerContract: ethers.Contract;
 
 /**
+ * Verify we're connected to the correct network
+ */
+async function verifyNetwork(): Promise<void> {
+  const network = await provider.getNetwork();
+  const connectedChainId = Number(network.chainId);
+
+  if (connectedChainId !== CONFIG.CHAIN_ID) {
+    throw new Error(
+      `Wrong network! Expected chain ID ${CONFIG.CHAIN_ID} (${CONFIG.TRADING_NETWORK}), ` +
+      `but connected to ${connectedChainId}. Check your .env TRADING_NETWORK setting.`
+    );
+  }
+
+  logger.info(`✓ Connected to ${CONFIG.TRADING_NETWORK} (Chain ID: ${connectedChainId})`);
+}
+
+/**
  * Initialize blockchain connection
  */
-export function initializeProvider(): void {
+export async function initializeProvider(): Promise<void> {
   if (provider) return; // Already initialized
 
-  provider = new ethers.JsonRpcProvider(CONFIG.BNB_RPC);
+  // Use RPC_URL from config (automatically selects opBNB or BNB based on TRADING_NETWORK)
+  provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
   wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY, provider);
+
+  // Use dynamic PANCAKE_ROUTER from config
   routerContract = new ethers.Contract(
-    CONFIG.PANCAKE_ROUTER_V2,
+    CONFIG.PANCAKE_ROUTER,
     ROUTER_ABI,
     wallet
   );
 
-  logger.info(`Blockchain initialized - Wallet: ${wallet.address}`);
+  logger.info(`Blockchain initializing...`);
+  logger.info(`  - Network: ${CONFIG.TRADING_NETWORK}`);
+  logger.info(`  - RPC: ${CONFIG.RPC_URL}`);
+  logger.info(`  - Wallet: ${wallet.address}`);
+  logger.info(`  - Router: ${CONFIG.PANCAKE_ROUTER}`);
+
+  // Verify network connection
+  await verifyNetwork();
 }
 
 /**
  * Get wallet BNB balance
  */
 export async function getWalletBalance(): Promise<number> {
-  initializeProvider();
+  await initializeProvider();
 
   const balance = await provider.getBalance(wallet.address);
   return parseFloat(ethers.formatEther(balance));
@@ -77,7 +104,7 @@ export async function getWalletBalance(): Promise<number> {
  * Get token balance
  */
 export async function getTokenBalance(tokenAddress: string): Promise<number> {
-  initializeProvider();
+  await initializeProvider();
 
   const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
   const balance = await tokenContract.balanceOf(wallet.address);
@@ -93,7 +120,7 @@ export async function getExpectedOutput(
   amountIn: bigint,
   path: string[]
 ): Promise<bigint> {
-  initializeProvider();
+  await initializeProvider();
 
   const amounts = await routerContract.getAmountsOut(amountIn, path);
   return amounts[amounts.length - 1];
@@ -195,12 +222,12 @@ async function executeSell(params: TradeParams): Promise<TradeResult> {
   const amountIn = ethers.parseUnits(tokenBalance.toString(), decimals);
 
   // Check/set approval
-  const allowance = await tokenContract.allowance(wallet.address, CONFIG.PANCAKE_ROUTER_V2);
+  const allowance = await tokenContract.allowance(wallet.address, CONFIG.PANCAKE_ROUTER);
 
   if (allowance < amountIn) {
     logger.info('Approving token spend...');
     const approveTx = await tokenContract.approve(
-      CONFIG.PANCAKE_ROUTER_V2,
+      CONFIG.PANCAKE_ROUTER,
       ethers.MaxUint256
     );
     await approveTx.wait();
@@ -270,7 +297,7 @@ async function executeSell(params: TradeParams): Promise<TradeResult> {
  * Main trade execution function
  */
 export async function executeTrade(params: TradeParams): Promise<TradeResult> {
-  initializeProvider();
+  await initializeProvider();
 
   const result = await withRetry(
     async () => {
@@ -294,7 +321,7 @@ export async function executeTrade(params: TradeParams): Promise<TradeResult> {
  * Estimate gas for a trade
  */
 export async function estimateTradeGas(params: TradeParams): Promise<bigint> {
-  initializeProvider();
+  await initializeProvider();
 
   const path =
     params.action === 'buy'
