@@ -1,44 +1,21 @@
 {
-  "name": "immortal-ai-trading-bot",
-  "version": "1.0.0",
-  "description": "Immortal AI Trading Bot for BNB Chain - Autonomous trading with decentralized memory",
-  "main": "index.ts",
+  "name": "ai-trading-bot",
+  "module": "index.ts",
   "type": "module",
-  "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun run --watch src/index.ts",
-    "dev:frontend": "bun --cwd apps/frontend dev",
-    "build": "bun build src/index.ts --outdir dist --target node",
-    "test": "bun test",
-    "lint": "eslint src/**/*.ts"
-  },
-  "keywords": [
-    "ai",
-    "trading",
-    "bnb",
-    "blockchain",
-    "defi",
-    "autonomous",
-    "pancakeswap"
-  ],
-  "author": "arhansubasi0",
-  "license": "MIT",
-  "dependencies": {
-    "ethers": "^6.13.4",
-    "@pancakeswap/sdk": "^5.7.0",
-    "@bnb-chain/greenfield-js-sdk": "^2.0.0",
-    "telegraf": "^4.16.3",
-    "dotenv": "^16.4.5",
-    "node-fetch": "^3.3.2",
-    "winston": "^3.14.2"
-  },
+  "private": true,
   "devDependencies": {
-    "@types/node": "^22.7.7",
-    "typescript": "^5.6.3",
-    "bun-types": "latest"
+    "@types/bun": "latest"
   },
-  "engines": {
-    "node": ">=18.0.0",
-    "bun": ">=1.0.0"
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "^1.2.0",
+    "@prisma/client": "^6.18.0",
+    "ai": "^5.0.81",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "prisma": "^6.18.0",
+    "recharts": "^3.3.0"
   }
 }
