@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import PerformanceChart from "./components/PerformanceChart";
 import RecentInvocations from "./components/RecentInvocations";
 import Navbar from "./components/Navbar";
-
-const BACKEND_URL = "https://api.ai-trading.100xdevs.com";
+import api from "./services/api";
 
 function ChartSkeleton() {
   return (
@@ -54,21 +53,41 @@ export default function App() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const perfRes = await fetch(`${BACKEND_URL}/performance`);
-        const perfData = await perfRes.json();
-        setPerformanceData(perfData.data);
-        setLastUpdated(perfData.lastUpdated);
+        // Fetch bot stats and trades from our backend API
+        const [stats, tradesResponse] = await Promise.all([
+          api.getStats(),
+          api.getTrades(30),
+        ]);
 
-        const invocRes = await fetch(`${BACKEND_URL}/invocations?limit=30`);
-        const invocData = await invocRes.json();
-        setInvocationsData(invocData.data);
+        // Transform stats data for performance chart
+        const perfData = {
+          totalPL: stats.totalProfitLoss,
+          winRate: stats.winRate,
+          totalTrades: stats.totalTrades,
+          profitableTrades: stats.profitableTrades,
+          losingTrades: stats.losingTrades,
+        };
+        setPerformanceData(perfData);
+        setLastUpdated(new Date());
+
+        // Use trades data for invocations
+        setInvocationsData(tradesResponse.trades);
       } catch (err) {
         console.error("Error fetching data:", err);
+        // Set empty data on error to show UI
+        setPerformanceData({
+          totalPL: 0,
+          winRate: 0,
+          totalTrades: 0,
+          profitableTrades: 0,
+          losingTrades: 0,
+        });
+        setInvocationsData([]);
       }
     }
 
     fetchData();
-    const interval = setInterval(fetchData, 3 * 60 * 1000);
+    const interval = setInterval(fetchData, 30 * 1000); // Refresh every 30 seconds
 
     return () => clearInterval(interval);
   }, []);

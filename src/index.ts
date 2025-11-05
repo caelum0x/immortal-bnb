@@ -22,6 +22,7 @@ import { storeMemory, fetchAllMemories, fetchMemory } from './blockchain/memoryS
 import { initializeTelegramBot, alertBotStatus, alertAIDecision, alertTradeExecution } from './alerts/telegramBot';
 import { TradeMemory } from './agent/learningLoop';
 import { calculateBuySellPressure } from './data/marketFetcher';
+import { startAPIServer } from './api/server';
 
 // Initialize OpenRouter
 const openrouter = createOpenRouter({
@@ -241,7 +242,7 @@ async function main() {
   logger.info('📍 Network: BNB Chain ' + (CONFIG.NETWORK === 'mainnet' ? 'MAINNET' : 'TESTNET'));
 
   // Initialize
-  initializeProvider();
+  await initializeProvider();
   await initializeTelegramBot();
 
   const balance = await getWalletBalance();
@@ -283,6 +284,9 @@ async function main() {
  * Start bot with interval
  */
 async function startBot() {
+  // Start API server for frontend communication
+  startAPIServer();
+
   // Run immediately
   await main();
 
