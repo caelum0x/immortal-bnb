@@ -1,85 +1,193 @@
+// src/blockchain/memoryStorage.ts
+// Handles decentralized storage of trade memories on BNB Greenfield for "immortality".
+// Memories are JSON objects stored as files, verifiable on-chain.
+// Adapted from official SDK docs: https://docs.bnbchain.org/bnb-greenfield/for-developers/apis-and-sdks/sdk-js/
+
+import { Client } from '@bnb-chain/greenfield-js-sdk'; // Main SDK for Greenfield client
+import { VisibilityType, RedundancyType } from '@bnb-chain/greenfield-js-sdk'; // Enums for visibility/redundancy
+import Long from 'long'; // For handling large numbers (required by SDK)
+import { ethers } from 'ethers'; // For wallet utilities (e.g., signer from private key)
 import { logger, logMemory, logError } from '../utils/logger';
-import { CONFIG } from '../config';
 import { TradeMemory } from '../agent/learningLoop';
-import { withRetry } from '../utils/errorHandler';
+import { CONFIG } from '../config';
 
-/**
- * NOTE: This is a simplified implementation of BNB Greenfield storage.
- * For production, you'll need to:
- * 1. Install: @bnb-chain/greenfield-js-sdk
- * 2. Set up Greenfield account and bucket
- * 3. Configure proper authentication
- *
- * For now, we'll use local file storage as fallback for development
- */
+// Constants from centralized config
+const GREENFIELD_RPC_URL = CONFIG.GREENFIELD_RPC_URL;
+const GREENFIELD_CHAIN_ID = CONFIG.GREENFIELD_CHAIN_ID;
+const BUCKET_NAME = CONFIG.GREENFIELD_BUCKET_NAME;
+const ACCOUNT_PRIVATE_KEY = CONFIG.WALLET_PRIVATE_KEY;
 
-interface StorageMetadata {
-  id: string;
-  timestamp: number;
-  type: 'trade_memory';
-  version: string;
+if (!ACCOUNT_PRIVATE_KEY) {
+  throw new Error('WALLET_PRIVATE_KEY not found in environment variables');
 }
 
-// In-memory store for development (replace with Greenfield in production)
-const memoryStore = new Map<string, TradeMemory>();
-let memoryIndex: string[] = [];
+const ACCOUNT_ADDRESS = new ethers.Wallet(ACCOUNT_PRIVATE_KEY).address; // Derive address
+
+// Initialize Greenfield client
+let client: Client;
+
+/**
+ * Initialize the Greenfield client
+ */
+async function initClient(): Promise<Client> {
+  if (!client) {
+    client = Client.create(GREENFIELD_RPC_URL, GREENFIELD_CHAIN_ID);
+    logger.info('Greenfield client initialized');
+  }
+  return client;
+}
+
+/**
+ * Helper: Create bucket if it doesn't exist (public read for simplicity)
+ */
+async function ensureBucketExists(): Promise<void> {
+  try {
+    const greenfieldClient = await initClient();
+
+    // Check if bucket exists
+    const headBucketRes = await greenfieldClient.bucket.headBucket(BUCKET_NAME);
+    if (headBucketRes.statusCode === 200) {
+      logger.info(`Bucket ${BUCKET_NAME} already exists.`);
+      return;
+    }
+  } catch (error: any) {
+    if (error.statusCode !== 404) {
+      logger.error('Error checking bucket:', error);
+      throw error; // Rethrow if not "not found"
+    }
+  }
+
+  try {
+    const greenfieldClient = await initClient();
+
+    // If not exists, create bucket
+    const createBucketTx = await greenfieldClient.bucket.createBucket({
+      bucketName: BUCKET_NAME,
+      creator: ACCOUNT_ADDRESS,
+      visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ, // Public for easy access
+      chargedReadQuota: Long.fromString('0'), // Free read quota
+      primarySpAddress: (await getPrimarySpAddress()), // Get SP from list
+      paymentAddress: ACCOUNT_ADDRESS,
+    });
+
+    // Simulate gas
+    const simulateInfo = await createBucketTx.simulate({ denom: 'BNB' });
+
+    // Broadcast transaction
+    const broadcastRes = await createBucketTx.broadcast({
+      denom: 'BNB',
+      gasLimit: Number(simulateInfo.gasLimit),
+      gasPrice: simulateInfo.gasPrice || '5000000000',
+      payer: ACCOUNT_ADDRESS,
+      granter: '',
+      privateKey: ACCOUNT_PRIVATE_KEY,
+    });
+
+    if (broadcastRes.code !== 0) {
+      throw new Error(`Bucket creation failed: ${broadcastRes.rawLog}`);
+    }
+
+    logger.info(`Bucket ${BUCKET_NAME} created successfully. Tx Hash: ${broadcastRes.transactionHash}`);
+  } catch (error) {
+    logError('ensureBucketExists', error as Error);
+    throw error;
+  }
+}
+
+/**
+ * Helper: Get primary Storage Provider (SP) address
+ */
+async function getPrimarySpAddress(): Promise<string> {
+  const greenfieldClient = await initClient();
+  const spList = await greenfieldClient.sp.getStorageProviders();
+  if (spList.length === 0) {
+    throw new Error('No storage providers available');
+  }
+  return spList[0].operatorAddress; // Use the first SP
+}
 
 /**
  * Initialize storage (create bucket if needed)
  */
 export async function initializeStorage(): Promise<void> {
   try {
-    logger.info('Initializing memory storage...');
-
-    // TODO: Initialize Greenfield client
-    // const client = await Client.create(CONFIG.GREENFIELD_RPC, String(CHAIN_ID));
-    // Check if bucket exists, create if not
-
-    logger.info('Memory storage initialized (using local fallback for development)');
+    logger.info('Initializing Greenfield memory storage...');
+    await ensureBucketExists();
+    logger.info('Greenfield memory storage initialized successfully');
   } catch (error) {
     logError('initializeStorage', error as Error);
-    logger.warn('Falling back to local memory storage');
+    logger.warn('Failed to initialize Greenfield storage');
+    throw error;
   }
 }
 
 /**
- * Store a trade memory on Greenfield (or fallback)
+ * Store memory (trade data as JSON) on Greenfield
  */
-export async function storeMemory(memory: TradeMemory): Promise<string> {
+export async function storeMemory(tradeData: TradeMemory): Promise<string> {
   try {
+    await ensureBucketExists(); // Ensure bucket ready
+
+    const greenfieldClient = await initClient();
+
+    // Generate unique ID
     const memoryId = `memory_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const memoryWithId = { ...memory, id: memoryId };
+    const memoryWithId = { ...tradeData, id: memoryId };
 
-    // Serialize memory
     const memoryJson = JSON.stringify(memoryWithId, null, 2);
+    const objectName = `trade_memory_${Date.now()}.json`; // Unique name
+    const payloadSize = memoryJson.length;
 
-    // TODO: Upload to Greenfield
-    /*
-    const uploadResult = await greenfieldClient.object.uploadObject({
-      bucketName: CONFIG.GREENFIELD_BUCKET_NAME,
-      objectName: `${memoryId}.json`,
-      body: memoryJson,
-      txnOption: {
-        gasLimit: 300000,
-        gasPrice: '5000000000',
-      },
+    // Create object transaction
+    const createObjectTx = await greenfieldClient.object.createObject({
+      bucketName: BUCKET_NAME,
+      objectName,
+      creator: ACCOUNT_ADDRESS,
+      visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ,
+      contentType: 'application/json',
+      redundancyType: RedundancyType.REDUNDANCY_EC_TYPE, // Error-correcting for reliability
+      payloadSize: Long.fromNumber(payloadSize),
+      expectChecksums: [], // Skip Reed-Solomon for small JSON; add if needed for larger data
     });
-    */
 
-    // Fallback: Store locally
-    memoryStore.set(memoryId, memoryWithId);
-    memoryIndex.push(memoryId);
+    // Simulate
+    const simulateInfo = await createObjectTx.simulate({ denom: 'BNB' });
 
-    // Keep only last 100 memories in local storage
-    if (memoryIndex.length > 100) {
-      const toRemove = memoryIndex.shift();
-      if (toRemove) {
-        memoryStore.delete(toRemove);
+    // Broadcast
+    const createRes = await createObjectTx.broadcast({
+      denom: 'BNB',
+      gasLimit: Number(simulateInfo.gasLimit),
+      gasPrice: simulateInfo.gasPrice || '5000000000',
+      payer: ACCOUNT_ADDRESS,
+      granter: '',
+      privateKey: ACCOUNT_PRIVATE_KEY,
+    });
+
+    if (createRes.code !== 0) {
+      throw new Error(`Object creation failed: ${createRes.rawLog}`);
+    }
+
+    // Upload the object content
+    const uploadRes = await greenfieldClient.object.uploadObject(
+      {
+        bucketName: BUCKET_NAME,
+        objectName,
+        body: memoryJson, // String or Buffer
+        txnHash: createRes.transactionHash,
+      },
+      {
+        type: 'ECDSA', // Private key signing
+        privateKey: ACCOUNT_PRIVATE_KEY,
       }
+    );
+
+    if (uploadRes.code !== 0) {
+      throw new Error(`Upload failed: ${uploadRes.message}`);
     }
 
     logMemory(memoryId, 'store');
-    logger.info(`Memory stored: ${memoryId} (${memory.tokenSymbol} ${memory.action})`);
+    logger.info(`Memory stored on Greenfield: ${memoryId} (Object ID: ${uploadRes.objectInfo?.id})`);
+    logger.info(`Token: ${tradeData.tokenSymbol}, Action: ${tradeData.action}`);
 
     return memoryId;
   } catch (error) {
@@ -89,52 +197,72 @@ export async function storeMemory(memory: TradeMemory): Promise<string> {
 }
 
 /**
- * Fetch a specific memory by ID
+ * Fetch memory by object name (returns parsed JSON)
  */
-export async function fetchMemory(memoryId: string): Promise<TradeMemory | null> {
+export async function fetchMemory(objectName: string): Promise<TradeMemory | null> {
   try {
-    // TODO: Fetch from Greenfield
-    /*
-    const downloadResult = await greenfieldClient.object.getObject({
-      bucketName: CONFIG.GREENFIELD_BUCKET_NAME,
-      objectName: `${memoryId}.json`,
-    });
-    const memoryJson = await downloadResult.body.text();
-    return JSON.parse(memoryJson);
-    */
+    const greenfieldClient = await initClient();
 
-    // Fallback: Get from local store
-    const memory = memoryStore.get(memoryId);
+    const getRes = await greenfieldClient.object.getObject(
+      {
+        bucketName: BUCKET_NAME,
+        objectName,
+      },
+      {
+        type: 'ECDSA',
+        privateKey: ACCOUNT_PRIVATE_KEY,
+      }
+    );
 
-    if (memory) {
-      logMemory(memoryId, 'fetch');
-      return memory;
+    if (getRes.code !== 0) {
+      throw new Error(`Fetch failed: ${getRes.message}`);
     }
 
-    logger.warn(`Memory not found: ${memoryId}`);
-    return null;
+    // Assuming body is a ReadableStream or Buffer (in Node.js)
+    const body = getRes.body as ReadableStream<Uint8Array>;
+    const chunks: Uint8Array[] = [];
+    const reader = body.getReader();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+
+    const memoryBuffer = Buffer.concat(chunks);
+    const memoryJson = memoryBuffer.toString('utf-8');
+
+    logMemory(objectName, 'fetch');
+    return JSON.parse(memoryJson);
   } catch (error) {
     logError('fetchMemory', error as Error);
+    logger.warn(`Memory not found: ${objectName}`);
     return null;
   }
 }
 
 /**
- * Fetch all memory IDs (for indexing)
+ * List all stored memories in bucket
  */
 export async function fetchAllMemories(): Promise<string[]> {
   try {
-    // TODO: List objects in Greenfield bucket
-    /*
-    const listResult = await greenfieldClient.object.listObjects({
-      bucketName: CONFIG.GREENFIELD_BUCKET_NAME,
-    });
-    return listResult.objects.map(obj => obj.objectName.replace('.json', ''));
-    */
+    const greenfieldClient = await initClient();
 
-    // Fallback: Return local index
-    return [...memoryIndex];
-  } catch (error) {
+    const listRes = await greenfieldClient.object.listObjects({
+      bucketName: BUCKET_NAME,
+    });
+
+    if (listRes.statusCode !== 200) {
+      throw new Error(`Failed to list objects: ${listRes.statusCode}`);
+    }
+
+    // Extract object names from response
+    const objectNames = listRes.body?.GfSpListObjectsByBucketNameResponse?.Objects?.map(
+      (obj: any) => obj.ObjectInfo?.ObjectName
+    ) || [];
+
+    return objectNames.filter((name: string) => name && name.endsWith('.json'));
+  } catch (error: any) {
     logError('fetchAllMemories', error as Error);
     return [];
   }
@@ -142,27 +270,29 @@ export async function fetchAllMemories(): Promise<string[]> {
 
 /**
  * Update an existing memory (e.g., when trade completes)
+ * Note: Greenfield doesn't support in-place updates, so we delete and re-create
  */
 export async function updateMemory(
-  memoryId: string,
+  objectName: string,
   updates: Partial<TradeMemory>
 ): Promise<boolean> {
   try {
-    const existing = await fetchMemory(memoryId);
+    const existing = await fetchMemory(objectName);
 
     if (!existing) {
-      logger.warn(`Cannot update non-existent memory: ${memoryId}`);
+      logger.warn(`Cannot update non-existent memory: ${objectName}`);
       return false;
     }
 
     const updated = { ...existing, ...updates };
 
-    // TODO: Update on Greenfield (delete old, upload new)
-    // For now, just update local store
-    memoryStore.set(memoryId, updated);
+    // Delete old object
+    await deleteMemory(objectName);
 
-    logger.info(`Memory updated: ${memoryId}`);
+    // Store updated version
+    await storeMemory(updated);
 
+    logger.info(`Memory updated: ${objectName}`);
     return true;
   } catch (error) {
     logError('updateMemory', error as Error);
@@ -171,24 +301,34 @@ export async function updateMemory(
 }
 
 /**
- * Delete a memory (cleanup)
+ * Delete a memory (optional, for cleanup)
  */
-export async function deleteMemory(memoryId: string): Promise<boolean> {
+export async function deleteMemory(objectName: string): Promise<boolean> {
   try {
-    // TODO: Delete from Greenfield
-    /*
-    await greenfieldClient.object.deleteObject({
-      bucketName: CONFIG.GREENFIELD_BUCKET_NAME,
-      objectName: `${memoryId}.json`,
+    const greenfieldClient = await initClient();
+
+    const deleteTx = await greenfieldClient.object.deleteObject({
+      bucketName: BUCKET_NAME,
+      objectName,
+      operator: ACCOUNT_ADDRESS,
     });
-    */
 
-    // Fallback: Delete from local store
-    memoryStore.delete(memoryId);
-    memoryIndex = memoryIndex.filter(id => id !== memoryId);
+    const simulateInfo = await deleteTx.simulate({ denom: 'BNB' });
 
-    logger.info(`Memory deleted: ${memoryId}`);
+    const deleteRes = await deleteTx.broadcast({
+      denom: 'BNB',
+      gasLimit: Number(simulateInfo.gasLimit),
+      gasPrice: simulateInfo.gasPrice || '5000000000',
+      payer: ACCOUNT_ADDRESS,
+      granter: '',
+      privateKey: ACCOUNT_PRIVATE_KEY,
+    });
 
+    if (deleteRes.code !== 0) {
+      throw new Error(`Delete failed: ${deleteRes.rawLog}`);
+    }
+
+    logger.info(`Memory ${objectName} deleted. Tx Hash: ${deleteRes.transactionHash}`);
     return true;
   } catch (error) {
     logError('deleteMemory', error as Error);
@@ -208,11 +348,11 @@ export async function queryMemories(filters: {
   limit?: number;
 }): Promise<TradeMemory[]> {
   try {
-    const allIds = await fetchAllMemories();
+    const allObjectNames = await fetchAllMemories();
     const memories: TradeMemory[] = [];
 
-    for (const id of allIds) {
-      const memory = await fetchMemory(id);
+    for (const objectName of allObjectNames) {
+      const memory = await fetchMemory(objectName);
 
       if (!memory) continue;
 
@@ -267,8 +407,8 @@ export async function getStorageStats(): Promise<{
   newestMemory: number | null;
   totalSize: number;
 }> {
-  const allIds = await fetchAllMemories();
-  const memories = await Promise.all(allIds.map(id => fetchMemory(id)));
+  const allObjectNames = await fetchAllMemories();
+  const memories = await Promise.all(allObjectNames.map(name => fetchMemory(name)));
 
   const validMemories = memories.filter(m => m !== null) as TradeMemory[];
 

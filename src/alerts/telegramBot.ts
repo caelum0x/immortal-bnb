@@ -1,7 +1,7 @@
 import { Telegraf } from 'telegraf';
 import { logger, logError } from '../utils/logger';
 import { CONFIG } from '../config';
-import { AIDecision } from '../agent/aiDecision';
+import { AIDecision } from '../types';
 import { TradeResult } from '../blockchain/tradeExecutor';
 import { TradeMemory } from '../agent/learningLoop';
 

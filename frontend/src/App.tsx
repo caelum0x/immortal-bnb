@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import PerformanceChart from "./components/PerformanceChart";
-import RecentInvocations from "./components/RecentInvocations";
+import RecentTrades from "./components/RecentTrades";
 import Navbar from "./components/Navbar";
-
-const BACKEND_URL = "https://api.ai-trading.100xdevs.com";
+import api from "./services/api";
 
 function ChartSkeleton() {
   return (
@@ -49,31 +48,51 @@ function ListSkeleton() {
 export default function App() {
   const [performanceData, setPerformanceData] = useState<any>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [invocationsData, setInvocationsData] = useState<any[] | null>(null);
+  const [tradesData, setTradesData] = useState<any[] | null>(null);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const perfRes = await fetch(`${BACKEND_URL}/performance`);
-        const perfData = await perfRes.json();
-        setPerformanceData(perfData.data);
-        setLastUpdated(perfData.lastUpdated);
+        // Fetch bot stats and trades from our backend API
+        const [stats, tradesResponse] = await Promise.all([
+          api.getStats(),
+          api.getTrades(30),
+        ]);
 
-        const invocRes = await fetch(`${BACKEND_URL}/invocations?limit=30`);
-        const invocData = await invocRes.json();
-        setInvocationsData(invocData.data);
+        // Transform stats data for performance chart
+        const perfData = {
+          totalPL: stats.totalProfitLoss,
+          winRate: stats.winRate,
+          totalTrades: stats.totalTrades,
+          profitableTrades: stats.profitableTrades,
+          losingTrades: stats.losingTrades,
+        };
+        setPerformanceData(perfData);
+        setLastUpdated(new Date());
+
+        // Set trades data
+        setTradesData(tradesResponse.trades);
       } catch (err) {
         console.error("Error fetching data:", err);
+        // Set empty data on error to show UI
+        setPerformanceData({
+          totalPL: 0,
+          winRate: 0,
+          totalTrades: 0,
+          profitableTrades: 0,
+          losingTrades: 0,
+        });
+        setTradesData([]);
       }
     }
 
     fetchData();
-    const interval = setInterval(fetchData, 3 * 60 * 1000);
+    const interval = setInterval(fetchData, 30 * 1000); // Refresh every 30 seconds
 
     return () => clearInterval(interval);
   }, []);
 
-  const loading = !performanceData || !invocationsData;
+  const loading = !performanceData || !tradesData;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-linear-to-b from-gray-50 to-gray-100 text-gray-900 font-[system-ui]">
@@ -86,8 +105,8 @@ export default function App() {
           </>
         ) : (
           <>
-            <PerformanceChart data={performanceData} />
-            <RecentInvocations data={invocationsData} />
+            <PerformanceChart data={performanceData} trades={tradesData} />
+            <RecentTrades data={tradesData} />
           </>
         )}
       </div>
