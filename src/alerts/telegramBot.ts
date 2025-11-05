@@ -1,9 +1,9 @@
 import { Telegraf } from 'telegraf';
 import { logger, logError } from '../utils/logger';
 import { CONFIG } from '../config';
-import { AIDecision } from '../types';
-import { TradeResult } from '../blockchain/tradeExecutor';
-import { TradeMemory } from '../agent/learningLoop';
+import type { AIDecision } from '../types';
+import type { TradeResult } from '../blockchain/tradeExecutor';
+import type { TradeMemory } from '../types/memory';
 
 let bot: Telegraf | null = null;
 let isInitialized = false;
@@ -84,7 +84,7 @@ async function sendMessage(text: string, parse_mode: 'Markdown' | 'HTML' = 'Mark
     await bot.telegram.sendMessage(CONFIG.TELEGRAM_CHAT_ID, text, {
       parse_mode,
       disable_web_page_preview: true,
-    });
+    } as any);
   } catch (error) {
     logError('sendTelegramMessage', error as Error);
   }

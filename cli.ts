@@ -17,6 +17,7 @@
 
 import { CONFIG } from './src/config';
 import { logger } from './src/utils/logger';
+import { testSmartTrading, discoverTokens, analyzeOpportunities } from './src/commands/smartTrade';
 
 const API_URL = `http://localhost:${process.env.API_PORT || 3001}`;
 
@@ -339,6 +340,11 @@ function showHelp() {
   console.log('  ' + c.cyan + 'memory [limit]' + c.reset + '      View Greenfield memories (default: 5)');
   console.log('  ' + c.cyan + 'test <address>' + c.reset + '      Test trade decision (no execution)');
   console.log('  ' + c.cyan + 'config' + c.reset + '              Show current configuration');
+  console.log('');
+  console.log(c.bright + '  🧠 SMART TRADING:' + c.reset);
+  console.log('  ' + c.cyan + 'smart-test' + c.reset + '          Test smart trading engine');
+  console.log('  ' + c.cyan + 'discover' + c.reset + '            Discover trending tokens');
+  console.log('  ' + c.cyan + 'opportunities' + c.reset + '       Analyze trading opportunities');
   console.log('  ' + c.cyan + 'help' + c.reset + '                Show this help message');
 
   console.log('\n' + c.bright + 'EXAMPLES:' + c.reset);
@@ -346,6 +352,9 @@ function showHelp() {
   console.log('  bun cli.ts trades 20');
   console.log('  bun cli.ts test 0x...');
   console.log('  bun cli.ts memory 10');
+  console.log('  bun cli.ts smart-test      # Test smart trading');
+  console.log('  bun cli.ts discover        # Find trending tokens');
+  console.log('  bun cli.ts opportunities   # Analyze opportunities');
 
   console.log('\n' + c.dim + 'For more information, see INTEGRATION_COMPLETE.md' + c.reset + '\n');
 }
@@ -377,6 +386,15 @@ async function main() {
     case 'config':
       await commandConfig();
       break;
+    case 'smart-test':
+      await testSmartTrading();
+      break;
+    case 'discover':
+      await discoverTokens();
+      break;
+    case 'opportunities':
+      await analyzeOpportunities();
+      break;
     case 'help':
     case '--help':
     case '-h':
@@ -390,7 +408,7 @@ async function main() {
   }
 }
 
-if (import.meta.main) {
+if (process.argv[1]?.includes('cli.ts')) {
   main().catch((error) => {
     console.error(c.red + '\nError: ' + error.message + c.reset);
     process.exit(1);

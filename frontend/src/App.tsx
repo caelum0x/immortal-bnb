@@ -49,10 +49,18 @@ export default function App() {
   const [performanceData, setPerformanceData] = useState<any>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [tradesData, setTradesData] = useState<any[] | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
 
   useEffect(() => {
     async function fetchData() {
       try {
+        setConnectionError(null);
+        
+        // Test connection first
+        await api.ping();
+        setIsConnected(true);
+
         // Fetch bot stats and trades from our backend API
         const [stats, tradesResponse] = await Promise.all([
           api.getStats(),
@@ -74,6 +82,9 @@ export default function App() {
         setTradesData(tradesResponse.trades);
       } catch (err) {
         console.error("Error fetching data:", err);
+        setIsConnected(false);
+        setConnectionError(err instanceof Error ? err.message : 'Unknown error');
+        
         // Set empty data on error to show UI
         setPerformanceData({
           totalPL: 0,
@@ -97,6 +108,21 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-linear-to-b from-gray-50 to-gray-100 text-gray-900 font-[system-ui]">
       <Navbar />
+      
+      {/* Connection Status Banner */}
+      {connectionError && (
+        <div className="bg-red-500 text-white px-4 py-2 text-sm">
+          <strong>Connection Error:</strong> {connectionError}
+          <span className="ml-2 text-red-100">Make sure the backend is running on http://localhost:3001</span>
+        </div>
+      )}
+      
+      {isConnected && (
+        <div className="bg-green-500 text-white px-4 py-1 text-xs text-center">
+          ✓ Connected to backend
+        </div>
+      )}
+      
       <div className="flex min-h-0 flex-1 flex-col md:flex-row overflow-y-auto md:overflow-hidden">
         {loading ? (
           <>

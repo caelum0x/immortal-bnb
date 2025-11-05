@@ -92,7 +92,7 @@ export function isRetryableError(error: Error): boolean {
   if (message.includes('status code')) {
     const statusMatch = message.match(/status code (\d+)/);
     if (statusMatch) {
-      const status = parseInt(statusMatch[1]);
+      const status = parseInt(statusMatch[1] || '0');
       return status >= 500 && status < 600;
     }
   }

@@ -66,13 +66,25 @@ class APIService {
   }
 
   private async fetch<T>(endpoint: string): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`);
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`);
 
-    if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`);
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error(`Network error: Cannot connect to backend at ${this.baseUrl}. Make sure the backend is running.`);
+      }
+      throw error;
     }
+  }
 
-    return response.json();
+  // Test connection to backend
+  async ping(): Promise<{ message: string; timestamp: number; frontend_connected: boolean }> {
+    return this.fetch('/api/ping');
   }
 
   // Health check

@@ -123,7 +123,5 @@ async function testTrade() {
   }
 }
 
-// Run the test
-if (import.meta.main) {
-  testTrade();
-}
+// Run the test if this file is executed directly
+testTrade();

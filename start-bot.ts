@@ -4,6 +4,7 @@
  * Validates all connections before starting trading
  */
 
+import 'reflect-metadata';
 import { logger } from './src/utils/logger';
 import { CONFIG } from './src/config';
 
@@ -134,7 +135,7 @@ async function checkGreenfieldConnection(): Promise<boolean> {
 
     info('Connecting to Greenfield...');
     const memoryIds = await fetchAllMemories();
-    success(`Connected to Greenfield bucket: ${CONFIG.GREENFIELD_BUCKET}`);
+    success(`Connected to Greenfield bucket: ${CONFIG.GREENFIELD_BUCKET_NAME}`);
     success(`Found ${memoryIds.length} stored memories`);
 
     return true;
@@ -389,7 +390,7 @@ async function main() {
 }
 
 // Run if executed directly
-if (import.meta.main) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
     console.error('\n' + colors.red + colors.bright + '💥 Fatal Error!' + colors.reset);
     console.error(colors.red + error.message + colors.reset);

@@ -80,16 +80,22 @@ export async function executeTrade(params: TradeParams): Promise<TradeResult> {
     const balance = await getWalletBalance();
     checkSufficientBalance(params.amountBNB, balance);
 
-    // Validate slippage
+    // Get quote to determine expected price for slippage validation
+    const quote = await pancakeSwap.getQuote(params.tokenAddress, params.amountBNB);
+    const expectedPrice = quote.pricePerToken;
+    
+    // Validate slippage tolerance
     const slippage = params.slippagePercent || CONFIG.MAX_SLIPPAGE_PERCENTAGE;
-    if (!validateSlippage(slippage)) {
-      throw new TradingError('Invalid slippage', 'INVALID_SLIPPAGE');
+    if (slippage < 0.1 || slippage > 50) {
+      throw new TradingError('Invalid slippage percentage', 'INVALID_SLIPPAGE');
     }
 
     logger.info(`\n📊 Executing ${params.action.toUpperCase()} trade`);
     logger.info(`  Token: ${params.tokenAddress}`);
     logger.info(`  Amount: ${params.amountBNB} BNB`);
     logger.info(`  Slippage: ${slippage}%`);
+    logger.info(`  Expected price: ${expectedPrice.toFixed(8)} BNB per token`);
+    logger.info(`  Expected tokens: ${quote.expectedTokens.toFixed(6)}`);
 
     let result;
 
@@ -100,6 +106,13 @@ export async function executeTrade(params: TradeParams): Promise<TradeResult> {
         params.amountBNB,
         slippage * 100 // Convert to basis points (0.5% = 50 bps)
       );
+
+      // Validate actual execution price against expected price
+      if (swapResult.success && swapResult.executionPrice) {
+        const actualPrice = parseFloat(swapResult.executionPrice);
+        validateSlippage(expectedPrice, actualPrice);
+        logger.info(`  Price validation passed - Expected: ${expectedPrice.toFixed(6)}, Actual: ${actualPrice.toFixed(6)}`);
+      }
 
       result = {
         success: swapResult.success,
@@ -118,12 +131,22 @@ export async function executeTrade(params: TradeParams): Promise<TradeResult> {
         throw new TradingError('No tokens to sell', 'NO_BALANCE');
       }
 
+      // For sell orders, get the current token price to validate execution
+      const currentTokenPrice = await pancakeSwap.getTokenPrice(params.tokenAddress);
+
       // Use PancakeSwap SDK to sell tokens
       const swapResult = await pancakeSwap.sellTokenForBNB(
         params.tokenAddress,
         tokenBalance.toString(),
         slippage * 100
       );
+
+      // Validate actual execution price against current market price
+      if (swapResult.success && swapResult.executionPrice) {
+        const actualPrice = parseFloat(swapResult.executionPrice);
+        validateSlippage(currentTokenPrice, actualPrice);
+        logger.info(`  Price validation passed - Expected: ${currentTokenPrice.toFixed(6)}, Actual: ${actualPrice.toFixed(6)}`);
+      }
 
       result = {
         success: swapResult.success,

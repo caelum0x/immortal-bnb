@@ -10,23 +10,26 @@
  * - OpenRouter AI with tool calling (kept from base)
  */
 
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import 'reflect-metadata';
+
+import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import { formatPrompt } from './prompt';
 import { CONFIG } from './config';
 import { logger } from './utils/logger';
-import { getTokenData, getTrendingTokens } from './data/marketFetcher';
+import { getTokenData, getTrendingTokens, calculateBuySellPressure } from './data/marketFetcher';
 import { executeTrade, getWalletBalance, initializeProvider } from './blockchain/tradeExecutor';
 import { storeMemory, fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
 import { initializeTelegramBot, alertBotStatus, alertAIDecision, alertTradeExecution } from './alerts/telegramBot';
-import { TradeMemory } from './agent/learningLoop';
-import { calculateBuySellPressure } from './data/marketFetcher';
+import type { TradeMemory } from './types/memory';
 import { startAPIServer } from './api/server';
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 
-// Initialize OpenRouter
-const openrouter = createOpenRouter({
+// Initialize OpenAI with OpenRouter endpoint
+const openai = createOpenAI({
   apiKey: CONFIG.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
 });
 
 // Track state
@@ -112,9 +115,9 @@ Sells (24h): ${tokenData.txns24h.sells}
 
     logger.info('📝 Sending prompt to AI...');
 
-    // Call AI with tools (adapted from base repo)
-    const response = await streamText({
-      model: openrouter('openai/gpt-4o-mini'),
+    // Call AI with tools (adapted from base repo)  
+    const response = streamText({
+      model: openai('openai/gpt-4o-mini') as any,
       prompt: enrichedPrompt,
       tools: {
         executeTrade: tool({
@@ -126,104 +129,20 @@ Sells (24h): ${tokenData.txns24h.sells}
             reasoning: z.string().describe('Detailed reasoning with specific data points (price, volume, liquidity, signals)'),
             confidence: z.number().min(0.7).max(1).describe('Confidence as decimal: 0.7=70%, 0.8=80%, 0.9=90%, 1.0=100%. Minimum 0.7 required'),
           }),
-          execute: async ({ tokenAddress: tradeTokenAddress, action, amountBNB, reasoning, confidence }) => {
-            logger.info(`\n⚡ AI Decision: ${action.toUpperCase()} ${amountBNB} BNB`);
-            logger.info(`Reasoning: ${reasoning}`);
-            logger.info(`Confidence: ${(confidence * 100).toFixed(0)}%`);
-
-            // Validate confidence
-            if (confidence < 0.7) {
-              logger.warn('❌ Trade rejected: Confidence too low (<70%)');
-              return { success: false, message: 'Confidence too low' };
-            }
-
-            // Alert user
-            await alertAIDecision(
-              {
-                action,
-                amount: amountBNB,
-                confidence,
-                reason: reasoning,
-                riskLevel: confidence > 0.8 ? 'low' : 'medium'
-              },
-              tokenData.symbol,
-              tradeTokenAddress
-            );
-
-            // Execute trade
-            logger.info('🔄 Executing trade on PancakeSwap...');
-            const result = await executeTrade({
-              tokenAddress: tradeTokenAddress,
-              action,
-              amountBNB,
-              slippagePercent: CONFIG.MAX_SLIPPAGE_PERCENTAGE,
-            });
-
-            // Alert result
-            await alertTradeExecution(result, tokenData.symbol, action);
-
-            if (!result.success) {
-              logger.error(`❌ Trade failed: ${result.error}`);
-              return { success: false, message: result.error };
-            }
-
-            logger.info(`✅ Trade executed: ${result.txHash}`);
-            logger.info(`Gas used: ${result.gasUsed}`);
-
-            // Store memory on Greenfield
-            const memory: TradeMemory = {
-              id: '',
-              timestamp: Date.now(),
-              tokenAddress: tradeTokenAddress,
-              tokenSymbol: tokenData.symbol,
-              action,
-              entryPrice: parseFloat(tokenData.priceUsd),
-              amount: amountBNB,
-              outcome: 'pending',
-              aiReasoning: reasoning,
-              marketConditions: {
-                volume24h: tokenData.volume24h,
-                liquidity: tokenData.liquidity,
-                priceChange24h: tokenData.priceChange24h,
-                buySellPressure: calculateBuySellPressure(tokenData),
-              },
-            };
-
-            const memoryId = await storeMemory(memory);
-            logger.info(`💾 Memory stored on Greenfield: ${memoryId}`);
-
-            // Track position
-            if (action === 'buy') {
-              activePositions.set(tradeTokenAddress, {
-                amount: amountBNB,
-                entryPrice: parseFloat(tokenData.priceUsd),
-                memoryId,
-                tokenSymbol: tokenData.symbol,
-              });
-            } else if (action === 'sell') {
-              activePositions.delete(tradeTokenAddress);
-            }
-
-            return {
-              success: true,
-              message: `Trade executed successfully! Tx: ${result.txHash}`,
-              txHash: result.txHash,
-              memoryId,
-            };
-          },
         }),
       },
-      maxSteps: 5, // Allow AI to think and use tools
+      toolChoice: 'auto',
     });
 
     // Stream and log AI response
     logger.info('\n💭 AI Response:');
-    for await (const chunk of response.textStream) {
+    const result = await response;
+    for await (const chunk of result.textStream) {
       process.stdout.write(chunk);
     }
     console.log('\n');
 
-    const finalText = await response.text;
+    const finalText = await result.text;
     logger.info(`\n✅ Invocation #${invocationCount} complete`);
 
     return finalText;
@@ -243,7 +162,7 @@ async function main() {
 
   // Initialize
   await initializeProvider();
-  await initializeTelegramBot();
+  initializeTelegramBot();
 
   const balance = await getWalletBalance();
   logger.info(`💰 Wallet Balance: ${balance.toFixed(4)} BNB`);
@@ -310,7 +229,7 @@ process.on('SIGTERM', async () => {
 });
 
 // Start if run directly
-if (import.meta.main) {
+if (require.main === module || process.argv[1]?.endsWith('index.ts')) {
   startBot().catch((error) => {
     logger.error(`Fatal error: ${error.message}`);
     process.exit(1);

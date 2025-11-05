@@ -3,7 +3,8 @@
  * Exposes REST endpoints for dashboard and monitoring
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
+import type { Request, Response } from 'express';
 import cors from 'cors';
 import { CONFIG } from '../config';
 import { logger } from '../utils/logger';
@@ -16,7 +17,14 @@ const app = express();
 const port = CONFIG.API_PORT;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:5173', // Vite dev server default port
+    'http://localhost:3000', // Alternative frontend port
+    'http://localhost:4173', // Vite preview port
+  ],
+  credentials: true,
+}));
 app.use(express.json());
 
 // Health check
@@ -26,6 +34,17 @@ app.get('/api/health', (req: Request, res: Response) => {
     timestamp: Date.now(),
     network: CONFIG.TRADING_NETWORK,
     chainId: CONFIG.CHAIN_ID,
+    server: 'Immortal AI Trading Bot API',
+    version: '1.0.0',
+  });
+});
+
+// Connection test endpoint for frontend
+app.get('/api/ping', (req: Request, res: Response) => {
+  res.json({
+    message: 'pong',
+    timestamp: Date.now(),
+    frontend_connected: true,
   });
 });
 
@@ -102,6 +121,13 @@ app.get('/api/trades', async (req: Request, res: Response) => {
 app.get('/api/trades/:memoryId', async (req: Request, res: Response) => {
   try {
     const { memoryId } = req.params;
+    
+    if (!memoryId) {
+      return res.status(400).json({
+        error: 'Memory ID is required',
+      });
+    }
+    
     const memory = await fetchMemory(memoryId);
 
     if (!memory) {
@@ -170,6 +196,13 @@ app.get('/api/stats', async (req: Request, res: Response) => {
 app.get('/api/token/:address', async (req: Request, res: Response) => {
   try {
     const { address } = req.params;
+    
+    if (!address) {
+      return res.status(400).json({
+        error: 'Token address is required',
+      });
+    }
+    
     const tokenData = await getTokenData(address);
 
     if (!tokenData) {
@@ -193,6 +226,13 @@ app.get('/api/token/:address', async (req: Request, res: Response) => {
 app.get('/api/token/:address/balance', async (req: Request, res: Response) => {
   try {
     const { address } = req.params;
+    
+    if (!address) {
+      return res.status(400).json({
+        error: 'Token address is required',
+      });
+    }
+    
     const pancakeSwap = new PancakeSwapV3();
     const balance = await pancakeSwap.getTokenBalance(address);
 

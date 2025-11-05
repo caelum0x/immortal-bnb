@@ -1,27 +1,9 @@
 import { logger, logMemory } from '../utils/logger';
 import { fetchMemory, fetchAllMemories } from '../blockchain/memoryStorage';
+import type { TradeMemory, MemoryAnalysis } from '../types/memory';
 
-export interface TradeMemory {
-  id: string;
-  timestamp: number;
-  tokenAddress: string;
-  tokenSymbol: string;
-  action: 'buy' | 'sell';
-  entryPrice: number;
-  exitPrice?: number;
-  amount: number;
-  outcome?: 'profit' | 'loss' | 'pending';
-  profitLoss?: number;
-  profitLossPercentage?: number;
-  aiReasoning: string;
-  marketConditions: {
-    volume24h: number;
-    liquidity: number;
-    priceChange24h: number;
-    buySellPressure: number;
-  };
-  lessons?: string;
-}
+// Re-export the types for convenience
+export type { TradeMemory, MemoryAnalysis };
 
 /**
  * Fetch recent memories to inform AI decisions
@@ -129,14 +111,7 @@ ${memory.lessons ? `- Lessons: ${memory.lessons}` : ''}
 /**
  * Analyze memories to generate insights
  */
-export function analyzeMemories(memories: TradeMemory[]): {
-  totalTrades: number;
-  winRate: number;
-  avgProfitLoss: number;
-  bestToken: string | null;
-  worstToken: string | null;
-  insights: string[];
-} {
+export function analyzeMemories(memories: TradeMemory[]): MemoryAnalysis {
   if (memories.length === 0) {
     return {
       totalTrades: 0,
