@@ -118,13 +118,13 @@ Sells (24h): ${tokenData.txns24h.sells}
       prompt: enrichedPrompt,
       tools: {
         executeTrade: tool({
-          description: 'Execute a trade on PancakeSwap. Only use for HIGH confidence trades (>70%). This spends real BNB!',
+          description: 'EXECUTE A REAL TRADE on PancakeSwap. Call this when confidence ≥0.7 (70%). This is the ONLY way to trade - analysis alone does NOT execute trades. You must call this tool to buy or sell!',
           parameters: z.object({
-            tokenAddress: z.string().describe('The token contract address to trade'),
-            action: z.enum(['buy', 'sell']).describe('Buy or sell the token'),
-            amountBNB: z.number().min(0.001).max(CONFIG.MAX_TRADE_AMOUNT_BNB).describe('Amount of BNB to trade'),
-            reasoning: z.string().describe('Clear explanation of why this trade is being made'),
-            confidence: z.number().min(0).max(1).describe('Confidence level 0-1'),
+            tokenAddress: z.string().describe('The token contract address (0x...)'),
+            action: z.enum(['buy', 'sell']).describe('buy = enter position with BNB, sell = exit position to BNB'),
+            amountBNB: z.number().min(0.01).max(CONFIG.MAX_TRADE_AMOUNT_BNB).describe('BNB amount: 0.01-0.05 for testing, scale up after wins'),
+            reasoning: z.string().describe('Detailed reasoning with specific data points (price, volume, liquidity, signals)'),
+            confidence: z.number().min(0.7).max(1).describe('Confidence as decimal: 0.7=70%, 0.8=80%, 0.9=90%, 1.0=100%. Minimum 0.7 required'),
           }),
           execute: async ({ tokenAddress: tradeTokenAddress, action, amountBNB, reasoning, confidence }) => {
             logger.info(`\n⚡ AI Decision: ${action.toUpperCase()} ${amountBNB} BNB`);
