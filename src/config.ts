@@ -84,10 +84,18 @@ export const CONFIG = {
 
   // Greenfield
   GREENFIELD_BUCKET_NAME: process.env.GREENFIELD_BUCKET_NAME || 'immortal-bot-memory',
+  GREENFIELD_RPC_URL: process.env.GREENFIELD_RPC_URL || 'https://gnfd-testnet-fullnode-tendermint-ap.bnbchain.org',
+  GREENFIELD_CHAIN_ID: process.env.GREENFIELD_CHAIN_ID || '5600',
   GREENFIELD_RPC: process.env.GREENFIELD_RPC || 'https://greenfield-chain.bnbchain.org',
 
   // APIs
   DEXSCREENER_API_URL: process.env.DEXSCREENER_API_URL || 'https://api.dexscreener.com/latest/dex',
+
+  // API Server
+  API_PORT: parseInt(process.env.API_PORT || '3001'),
+
+  // Logging
+  LOG_LEVEL: process.env.LOG_LEVEL || 'info',
 
   // Bot Configuration
   BOT_LOOP_INTERVAL_MS: parseInt(process.env.BOT_LOOP_INTERVAL_MS || '300000'),

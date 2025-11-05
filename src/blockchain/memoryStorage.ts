@@ -7,17 +7,15 @@ import { Client } from '@bnb-chain/greenfield-js-sdk'; // Main SDK for Greenfiel
 import { VisibilityType, RedundancyType } from '@bnb-chain/greenfield-js-sdk'; // Enums for visibility/redundancy
 import Long from 'long'; // For handling large numbers (required by SDK)
 import { ethers } from 'ethers'; // For wallet utilities (e.g., signer from private key)
-import dotenv from 'dotenv'; // For loading .env
 import { logger, logMemory, logError } from '../utils/logger';
 import { TradeMemory } from '../agent/learningLoop';
+import { CONFIG } from '../config';
 
-dotenv.config(); // Load environment variables
-
-// Constants (use testnet for dev)
-const GREENFIELD_RPC_URL = process.env.GREENFIELD_RPC_URL || 'https://gnfd-testnet-fullnode-tendermint-ap.bnbchain.org';
-const GREENFIELD_CHAIN_ID = process.env.GREENFIELD_CHAIN_ID || '5600'; // Testnet chain ID
-const BUCKET_NAME = process.env.GREENFIELD_BUCKET_NAME || 'immortal-bot-memory'; // Fixed bucket name (create once)
-const ACCOUNT_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY; // From .env (test wallet)
+// Constants from centralized config
+const GREENFIELD_RPC_URL = CONFIG.GREENFIELD_RPC_URL;
+const GREENFIELD_CHAIN_ID = CONFIG.GREENFIELD_CHAIN_ID;
+const BUCKET_NAME = CONFIG.GREENFIELD_BUCKET_NAME;
+const ACCOUNT_PRIVATE_KEY = CONFIG.WALLET_PRIVATE_KEY;
 
 if (!ACCOUNT_PRIVATE_KEY) {
   throw new Error('WALLET_PRIVATE_KEY not found in environment variables');

@@ -13,7 +13,7 @@ import { getTokenData } from '../data/marketFetcher';
 import PancakeSwapV3 from '../blockchain/pancakeSwapIntegration';
 
 const app = express();
-const port = process.env.API_PORT || 3001;
+const port = CONFIG.API_PORT;
 
 // Middleware
 app.use(cors());

@@ -270,8 +270,7 @@ async function commandConfig() {
   console.log('\n' + c.dim + '  Greenfield:' + c.reset);
   printTable([
     ['  RPC', CONFIG.GREENFIELD_RPC],
-    ['  Chain ID', CONFIG.GREENFIELD_CHAIN_ID.toString()],
-    ['  Bucket', CONFIG.GREENFIELD_BUCKET],
+    ['  Bucket', CONFIG.GREENFIELD_BUCKET_NAME],
   ]);
 
   console.log('\n' + c.dim + '  API Keys:' + c.reset);
