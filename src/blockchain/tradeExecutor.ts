@@ -7,22 +7,7 @@ import {
   validateSlippage,
 } from '../utils/safeguards';
 import { CONFIG } from '../config';
-
-// PancakeSwap V2 Router ABI (simplified - only functions we need)
-const ROUTER_ABI = [
-  'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
-  'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)',
-];
-
-// ERC20 ABI (for token approvals)
-const ERC20_ABI = [
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-  'function balanceOf(address account) external view returns (uint256)',
-  'function decimals() external view returns (uint8)',
-  'function symbol() external view returns (string)',
-];
+import PancakeSwapV3 from './pancakeSwapIntegration';
 
 export interface TradeParams {
   tokenAddress: string;
@@ -42,52 +27,25 @@ export interface TradeResult {
   error?: string;
 }
 
-let provider: ethers.JsonRpcProvider;
-let wallet: ethers.Wallet;
-let routerContract: ethers.Contract;
+let pancakeSwap: PancakeSwapV3;
 
 /**
- * Verify we're connected to the correct network
- */
-async function verifyNetwork(): Promise<void> {
-  const network = await provider.getNetwork();
-  const connectedChainId = Number(network.chainId);
-
-  if (connectedChainId !== CONFIG.CHAIN_ID) {
-    throw new Error(
-      `Wrong network! Expected chain ID ${CONFIG.CHAIN_ID} (${CONFIG.TRADING_NETWORK}), ` +
-      `but connected to ${connectedChainId}. Check your .env TRADING_NETWORK setting.`
-    );
-  }
-
-  logger.info(`✓ Connected to ${CONFIG.TRADING_NETWORK} (Chain ID: ${connectedChainId})`);
-}
-
-/**
- * Initialize blockchain connection
+ * Initialize blockchain connection and PancakeSwap SDK
  */
 export async function initializeProvider(): Promise<void> {
-  if (provider) return; // Already initialized
+  if (pancakeSwap) return; // Already initialized
 
-  // Use RPC_URL from config (automatically selects opBNB or BNB based on TRADING_NETWORK)
-  provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
-  wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY, provider);
-
-  // Use dynamic PANCAKE_ROUTER from config
-  routerContract = new ethers.Contract(
-    CONFIG.PANCAKE_ROUTER,
-    ROUTER_ABI,
-    wallet
-  );
-
-  logger.info(`Blockchain initializing...`);
+  logger.info(`🚀 Initializing trading system...`);
   logger.info(`  - Network: ${CONFIG.TRADING_NETWORK}`);
+  logger.info(`  - Chain ID: ${CONFIG.CHAIN_ID}`);
   logger.info(`  - RPC: ${CONFIG.RPC_URL}`);
-  logger.info(`  - Wallet: ${wallet.address}`);
-  logger.info(`  - Router: ${CONFIG.PANCAKE_ROUTER}`);
 
-  // Verify network connection
-  await verifyNetwork();
+  // Initialize PancakeSwap V3 SDK integration
+  pancakeSwap = new PancakeSwapV3();
+
+  const balance = await pancakeSwap.getBalance();
+  logger.info(`  - Wallet Balance: ${balance.toFixed(4)} BNB`);
+  logger.info(`✅ Trading system ready!`);
 }
 
 /**
@@ -95,9 +53,7 @@ export async function initializeProvider(): Promise<void> {
  */
 export async function getWalletBalance(): Promise<number> {
   await initializeProvider();
-
-  const balance = await provider.getBalance(wallet.address);
-  return parseFloat(ethers.formatEther(balance));
+  return await pancakeSwap.getBalance();
 }
 
 /**
@@ -105,12 +61,7 @@ export async function getWalletBalance(): Promise<number> {
  */
 export async function getTokenBalance(tokenAddress: string): Promise<number> {
   await initializeProvider();
-
-  const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-  const balance = await tokenContract.balanceOf(wallet.address);
-  const decimals = await tokenContract.decimals();
-
-  return parseFloat(ethers.formatUnits(balance, decimals));
+  return await pancakeSwap.getTokenBalance(tokenAddress);
 }
 
 /**
@@ -294,27 +245,99 @@ async function executeSell(params: TradeParams): Promise<TradeResult> {
 }
 
 /**
- * Main trade execution function
+ * Main trade execution function - now using PancakeSwap V3 SDK
  */
 export async function executeTrade(params: TradeParams): Promise<TradeResult> {
   await initializeProvider();
 
-  const result = await withRetry(
-    async () => {
-      if (params.action === 'buy') {
-        return await executeBuy(params);
-      } else if (params.action === 'sell') {
-        return await executeSell(params);
-      } else {
-        throw new TradingError('Invalid action', 'INVALID_ACTION');
-      }
-    },
-    2, // Retry twice for network issues
-    3000,
-    `Trade ${params.action}`
-  );
+  try {
+    // Validate trade amount
+    if (!validateTradeAmount(params.amountBNB)) {
+      throw new TradingError('Invalid trade amount', 'INVALID_AMOUNT');
+    }
 
-  return result;
+    // Check balance
+    const balance = await getWalletBalance();
+    checkSufficientBalance(params.amountBNB, balance);
+
+    // Validate slippage
+    const slippage = params.slippagePercent || CONFIG.MAX_SLIPPAGE_PERCENTAGE;
+    if (!validateSlippage(slippage)) {
+      throw new TradingError('Invalid slippage', 'INVALID_SLIPPAGE');
+    }
+
+    logger.info(`\n📊 Executing ${params.action.toUpperCase()} trade`);
+    logger.info(`  Token: ${params.tokenAddress}`);
+    logger.info(`  Amount: ${params.amountBNB} BNB`);
+    logger.info(`  Slippage: ${slippage}%`);
+
+    let result;
+
+    if (params.action === 'buy') {
+      // Use PancakeSwap SDK to buy tokens
+      const swapResult = await pancakeSwap.buyTokenWithBNB(
+        params.tokenAddress,
+        params.amountBNB,
+        slippage * 100 // Convert to basis points (0.5% = 50 bps)
+      );
+
+      result = {
+        success: swapResult.success,
+        txHash: swapResult.txHash,
+        amountIn: swapResult.amountIn,
+        amountOut: swapResult.amountOut,
+        actualPrice: swapResult.executionPrice ? parseFloat(swapResult.executionPrice) : 0,
+        gasUsed: swapResult.gasUsed,
+        error: swapResult.error,
+      };
+    } else if (params.action === 'sell') {
+      // Get token balance first
+      const tokenBalance = await getTokenBalance(params.tokenAddress);
+
+      if (tokenBalance === 0) {
+        throw new TradingError('No tokens to sell', 'NO_BALANCE');
+      }
+
+      // Use PancakeSwap SDK to sell tokens
+      const swapResult = await pancakeSwap.sellTokenForBNB(
+        params.tokenAddress,
+        tokenBalance.toString(),
+        slippage * 100
+      );
+
+      result = {
+        success: swapResult.success,
+        txHash: swapResult.txHash,
+        amountIn: swapResult.amountIn,
+        amountOut: swapResult.amountOut,
+        actualPrice: swapResult.executionPrice ? parseFloat(swapResult.executionPrice) : 0,
+        gasUsed: swapResult.gasUsed,
+        error: swapResult.error,
+      };
+    } else {
+      throw new TradingError('Invalid action', 'INVALID_ACTION');
+    }
+
+    if (result.success) {
+      logger.info(`✅ Trade executed successfully!`);
+      logger.info(`  TX Hash: ${result.txHash}`);
+      logger.info(`  Amount Out: ${result.amountOut}`);
+      logger.info(`  Gas Used: ${result.gasUsed}`);
+    } else {
+      logger.error(`❌ Trade failed: ${result.error}`);
+    }
+
+    return result;
+  } catch (error) {
+    logError('executeTrade', error as Error);
+    return {
+      success: false,
+      amountIn: params.amountBNB.toString(),
+      amountOut: '0',
+      actualPrice: 0,
+      error: (error as Error).message,
+    };
+  }
 }
 
 /**
