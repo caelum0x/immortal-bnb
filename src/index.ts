@@ -317,4 +317,4 @@ if (import.meta.main) {
   });
 }
 
-export { invokeAgent, main };
+export { invokeAgent, main, startBot };

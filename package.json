@@ -4,11 +4,18 @@
   "description": "An autonomous AI trading agent for BNB Chain with immortal memory storage on BNB Greenfield",
   "main": "src/index.ts",
   "scripts": {
-    "start": "bun run src/index.ts",
+    "start": "bun start-bot.ts",
     "dev": "bun run --watch src/index.ts",
-    "dev:frontend": "bun --cwd apps/frontend dev",
+    "dev:frontend": "bun --cwd frontend dev",
     "build": "bun build src/index.ts --outdir dist --target node",
     "test": "bun test",
+    "test:integration": "bun test-integration.ts",
+    "test:trade": "bun test-trade.ts",
+    "cli": "bun cli.ts",
+    "status": "bun cli.ts status",
+    "balance": "bun cli.ts balance",
+    "trades": "bun cli.ts trades",
+    "stats": "bun cli.ts stats",
     "lint": "eslint src/**/*.ts"
   },
   "keywords": [
