@@ -2,6 +2,10 @@
 
 An autonomous AI trading agent for BNB Chain that learns and evolves through decentralized memory storage.
 
+> **Built on**: Inspired by [hkirat/ai-trading-agent](https://github.com/hkirat/ai-trading-agent) and adapted specifically for BNB Chain with PancakeSwap spot trading and BNB Greenfield immortal memory.
+
+---
+
 ## 🌟 Features
 
 - **AI-Powered Trading**: Uses OpenRouter LLMs (GPT-4o-mini) for intelligent trading decisions
