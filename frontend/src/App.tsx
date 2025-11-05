@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import PerformanceChart from "./components/PerformanceChart";
-import RecentInvocations from "./components/RecentInvocations";
+import RecentTrades from "./components/RecentTrades";
 import Navbar from "./components/Navbar";
 import api from "./services/api";
 
@@ -48,7 +48,7 @@ function ListSkeleton() {
 export default function App() {
   const [performanceData, setPerformanceData] = useState<any>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [invocationsData, setInvocationsData] = useState<any[] | null>(null);
+  const [tradesData, setTradesData] = useState<any[] | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -70,8 +70,8 @@ export default function App() {
         setPerformanceData(perfData);
         setLastUpdated(new Date());
 
-        // Use trades data for invocations
-        setInvocationsData(tradesResponse.trades);
+        // Set trades data
+        setTradesData(tradesResponse.trades);
       } catch (err) {
         console.error("Error fetching data:", err);
         // Set empty data on error to show UI
@@ -82,7 +82,7 @@ export default function App() {
           profitableTrades: 0,
           losingTrades: 0,
         });
-        setInvocationsData([]);
+        setTradesData([]);
       }
     }
 
@@ -92,7 +92,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const loading = !performanceData || !invocationsData;
+  const loading = !performanceData || !tradesData;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-linear-to-b from-gray-50 to-gray-100 text-gray-900 font-[system-ui]">
@@ -105,8 +105,8 @@ export default function App() {
           </>
         ) : (
           <>
-            <PerformanceChart data={performanceData} />
-            <RecentInvocations data={invocationsData} />
+            <PerformanceChart data={performanceData} trades={tradesData} />
+            <RecentTrades data={tradesData} />
           </>
         )}
       </div>
