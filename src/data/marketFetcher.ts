@@ -168,12 +168,71 @@ export async function getMultipleTokensData(
 }
 
 /**
- * Get trending tokens on BNB Chain
- * Note: DexScreener doesn't have a public trending endpoint.
- * This function uses a curated list of popular tokens instead.
+ * Get trending/boosted tokens on BNB Chain
+ * Uses DexScreener's token boosts API to find popular tokens
  */
 export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]> {
-  // Popular BNB Chain tokens (you can customize this list)
+  const boostedUrl = 'https://api.dexscreener.com/token-boosts/top/v1';
+
+  try {
+    logger.info('Fetching trending tokens from DexScreener boosts...');
+
+    const response = await fetch(boostedUrl);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch boosted tokens: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    // The API might return a single object or an array
+    const boosts = Array.isArray(data) ? data : [data];
+
+    // Filter for BNB chain tokens and get their addresses
+    const bnbTokens = boosts
+      .filter((boost: any) => boost.chainId === 'bsc' && boost.tokenAddress)
+      .map((boost: any) => boost.tokenAddress)
+      .slice(0, limit);
+
+    if (bnbTokens.length === 0) {
+      logger.warn('No BNB tokens found in boosts, using fallback list');
+      return getTrendingTokensFallback(limit);
+    }
+
+    logger.info(`Found ${bnbTokens.length} boosted BNB tokens`);
+
+    // Fetch detailed data for each token
+    const results: TokenData[] = [];
+
+    for (const tokenAddress of bnbTokens) {
+      try {
+        const tokenData = await getTokenData(tokenAddress);
+        if (tokenData) {
+          results.push(tokenData);
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (error) {
+        logger.warn(`Could not fetch data for ${tokenAddress}`);
+      }
+    }
+
+    logger.info(`Fetched ${results.length} trending tokens`);
+    return results;
+
+  } catch (error) {
+    logError('getTrendingTokens', error as Error);
+    logger.info('Falling back to curated token list');
+    return getTrendingTokensFallback(limit);
+  }
+}
+
+/**
+ * Fallback: Get popular BNB Chain tokens (used when API fails)
+ */
+async function getTrendingTokensFallback(limit: number = 10): Promise<TokenData[]> {
+  // Popular BNB Chain tokens as fallback
   const popularTokens = [
     '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // ETH
     '0x55d398326f99059fF775485246999027B3197955', // USDT
@@ -189,7 +248,6 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
 
   const results: TokenData[] = [];
 
-  // Fetch data for each token
   for (const tokenAddress of popularTokens.slice(0, limit)) {
     try {
       const tokenData = await getTokenData(tokenAddress);
@@ -197,7 +255,6 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
         results.push(tokenData);
       }
 
-      // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
       logger.warn(`Could not fetch data for ${tokenAddress}`);
@@ -205,7 +262,6 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
   }
 
   logger.info(`Fetched ${results.length} popular tokens`);
-
   return results;
 }
 
