@@ -169,51 +169,44 @@ export async function getMultipleTokensData(
 
 /**
  * Get trending tokens on BNB Chain
+ * Note: DexScreener doesn't have a public trending endpoint.
+ * This function uses a curated list of popular tokens instead.
  */
 export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]> {
-  const url = `${CONFIG.DEXSCREENER_API_URL}/tokens/bnb/trending`;
+  // Popular BNB Chain tokens (you can customize this list)
+  const popularTokens = [
+    '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // ETH
+    '0x55d398326f99059fF775485246999027B3197955', // USDT
+    '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', // USDC
+    '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', // BTCB
+    '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', // BUSD
+    '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE', // XRP
+    '0xbA2aE424d960c26247Dd6c32edC70B295c744C43', // DOGE
+    '0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47', // ADA
+  ];
 
-  try {
-    const response = await fetch(url);
+  logger.info('Fetching data for popular BNB Chain tokens...');
 
-    if (!response.ok) {
-      throw new APIError(
-        `DexScreener trending API error: ${response.statusText}`,
-        response.status,
-        url
-      );
+  const results: TokenData[] = [];
+
+  // Fetch data for each token
+  for (const tokenAddress of popularTokens.slice(0, limit)) {
+    try {
+      const tokenData = await getTokenData(tokenAddress);
+      if (tokenData) {
+        results.push(tokenData);
+      }
+
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      logger.warn(`Could not fetch data for ${tokenAddress}`);
     }
-
-    const data = (await response.json()) as DexScreenerResponse;
-
-    const trending: TokenData[] = data.pairs
-      .slice(0, limit)
-      .map(pair => ({
-        address: pair.baseToken.address,
-        symbol: pair.baseToken.symbol,
-        name: pair.baseToken.name,
-        price: parseFloat(pair.priceNative),
-        priceChange24h: pair.priceChange?.h24 || 0,
-        volume24h: pair.volume?.h24 || 0,
-        liquidity: pair.liquidity?.usd || 0,
-        marketCap: pair.marketCap || 0,
-        fdv: pair.fdv || 0,
-        priceUsd: pair.priceUsd,
-        txns24h: {
-          buys: pair.txns?.h24?.buys || 0,
-          sells: pair.txns?.h24?.sells || 0,
-        },
-        pairAddress: pair.pairAddress,
-        dexId: pair.dexId,
-      }));
-
-    logger.info(`Fetched ${trending.length} trending tokens`);
-
-    return trending;
-  } catch (error) {
-    logError('getTrendingTokens', error as Error);
-    return [];
   }
+
+  logger.info(`Fetched ${results.length} popular tokens`);
+
+  return results;
 }
 
 /**

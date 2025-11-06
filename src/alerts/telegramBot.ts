@@ -11,9 +11,16 @@ let isInitialized = false;
 /**
  * Initialize Telegram bot
  */
-export function initializeTelegramBot(): void {
+export async function initializeTelegramBot(): Promise<void> {
   if (!CONFIG.TELEGRAM_BOT_TOKEN) {
     logger.warn('Telegram bot token not configured - alerts disabled');
+    return;
+  }
+
+  // Check if token looks valid (should start with a number and contain a colon)
+  if (!CONFIG.TELEGRAM_BOT_TOKEN.includes(':') || CONFIG.TELEGRAM_BOT_TOKEN === 'your_telegram_bot_token_here') {
+    logger.warn('Invalid Telegram bot token format - alerts disabled');
+    logger.info('Get a real token from @BotFather on Telegram');
     return;
   }
 
@@ -51,18 +58,31 @@ export function initializeTelegramBot(): void {
       );
     });
 
-    // Launch bot
-    bot.launch();
+    // Launch bot with error handling
+    await bot.launch();
     isInitialized = true;
 
     logger.info('Telegram bot initialized and running');
 
     // Graceful shutdown
-    process.once('SIGINT', () => bot?.stop('SIGINT'));
-    process.once('SIGTERM', () => bot?.stop('SIGTERM'));
+    const stopHandler = () => {
+      if (bot && isInitialized) {
+        try {
+          bot.stop();
+        } catch (e) {
+          // Ignore stop errors
+        }
+      }
+    };
+
+    process.once('SIGINT', stopHandler);
+    process.once('SIGTERM', stopHandler);
   } catch (error) {
     logError('initializeTelegramBot', error as Error);
     logger.warn('Telegram bot initialization failed - continuing without alerts');
+    logger.info('Check your TELEGRAM_BOT_TOKEN in .env or disable Telegram alerts');
+    bot = null;
+    isInitialized = false;
   }
 }
 
