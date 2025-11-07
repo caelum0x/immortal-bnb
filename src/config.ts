@@ -1,4 +1,5 @@
 import { config } from 'dotenv';
+import { ethers } from 'ethers';
 config();
 
 // Determine which network to use for trading
@@ -60,6 +61,8 @@ export const CONFIG = {
   BNB_RPC: NETWORK_CONFIG.bnb.RPC,
 
   WALLET_PRIVATE_KEY: process.env.WALLET_PRIVATE_KEY || '',
+  WALLET_ADDRESS: process.env.WALLET_ADDRESS || (process.env.WALLET_PRIVATE_KEY ? 
+    new ethers.Wallet(process.env.WALLET_PRIVATE_KEY).address : ''),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
@@ -82,6 +85,9 @@ export const CONFIG = {
   STOP_LOSS_PERCENTAGE: parseFloat(process.env.STOP_LOSS_PERCENTAGE || '5'),
   MAX_SLIPPAGE_PERCENTAGE: parseFloat(process.env.MAX_SLIPPAGE_PERCENTAGE || '2'),
 
+  // AI Trading Thresholds
+  MIN_CONFIDENCE_THRESHOLD: parseFloat(process.env.MIN_CONFIDENCE_THRESHOLD || '0.7'),
+  
   // Greenfield
   GREENFIELD_BUCKET_NAME: process.env.GREENFIELD_BUCKET_NAME || 'immortal-bot-memory',
   GREENFIELD_RPC_URL: process.env.GREENFIELD_RPC_URL || 'https://gnfd-testnet-fullnode-tendermint-ap.bnbchain.org',

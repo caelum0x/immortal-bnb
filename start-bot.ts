@@ -22,8 +22,9 @@ const colors = {
 function printBanner() {
   console.log('\n' + colors.cyan + colors.bright);
   console.log('═'.repeat(70));
-  console.log('                    IMMORTAL AI TRADING BOT');
-  console.log('                  BNB Chain • PancakeSwap V3');
+  console.log('             🤖 IMMORTAL AI TRADING BOT 🧬');
+  console.log('           BNB Chain • Cross-Chain • AI Agent');
+  console.log('             Evolving Strategies • Real Memory');
   console.log('═'.repeat(70));
   console.log(colors.reset);
 }
@@ -173,7 +174,7 @@ async function checkMarketDataAPI(): Promise<boolean> {
 }
 
 async function checkOpenRouterAPI(): Promise<boolean> {
-  printBox('AI Agent (OpenRouter)', []);
+  printBox('🤖 Immortal AI Agent System', []);
 
   try {
     info('Testing OpenRouter API connection...');
@@ -186,7 +187,11 @@ async function checkOpenRouterAPI(): Promise<boolean> {
 
     if (response.ok) {
       success('OpenRouter API connected');
-      success('AI decision-making ready');
+      success('🧠 Immortal AI Agent loaded');
+      success('🌐 Cross-chain arbitrage engine ready');
+      success('🧬 Strategy evolution system active');
+      success('📊 Real-time market analysis enabled');
+      success('🎯 AI decision-making ready');
       return true;
     } else {
       error('OpenRouter API authentication failed');

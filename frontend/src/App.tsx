@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import PerformanceChart from "./components/PerformanceChart";
 import RecentTrades from "./components/RecentTrades";
 import Navbar from "./components/Navbar";
+import AIAgentStatus from "./components/AIAgentStatus";
+import CrossChainOpportunities from "./components/CrossChainOpportunities";
+import StrategyEvolution from "./components/StrategyEvolution";
+import AIDecisionTester from "./components/AIDecisionTester";
 import api from "./services/api";
 
 function ChartSkeleton() {
@@ -51,6 +55,7 @@ export default function App() {
   const [tradesData, setTradesData] = useState<any[] | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   useEffect(() => {
     async function fetchData() {
@@ -105,6 +110,14 @@ export default function App() {
 
   const loading = !performanceData || !tradesData;
 
+  const tabs = [
+    { id: 'dashboard', name: '📊 Dashboard', icon: '📈' },
+    { id: 'ai-agent', name: '🤖 AI Agent', icon: '🧠' },
+    { id: 'arbitrage', name: '🌐 Cross-Chain', icon: '🔗' },
+    { id: 'evolution', name: '🧬 Evolution', icon: '🚀' },
+    { id: 'tester', name: '🧪 AI Tester', icon: '⚡' },
+  ];
+
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-linear-to-b from-gray-50 to-gray-100 text-gray-900 font-[system-ui]">
       <Navbar />
@@ -119,23 +132,84 @@ export default function App() {
       
       {isConnected && (
         <div className="bg-green-500 text-white px-4 py-1 text-xs text-center">
-          ✓ Connected to backend
+          ✓ Connected to backend • 🤖 Immortal AI Active
         </div>
       )}
       
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row overflow-y-auto md:overflow-hidden">
-        {loading ? (
-          <>
-            <ChartSkeleton />
-            <ListSkeleton />
-          </>
-        ) : (
-          <>
-            <PerformanceChart data={performanceData} trades={tradesData} />
-            <RecentTrades data={tradesData} />
-          </>
+      {/* Tab Navigation */}
+      <div className="border-b border-gray-200">
+        <div className="flex overflow-x-auto">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.id
+                  ? 'border-blue-500 text-blue-600 bg-blue-50'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <span className="mr-2">{tab.icon}</span>
+              {tab.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Tab Content */}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === 'dashboard' && (
+          <div className="h-full flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
+            {loading ? (
+              <>
+                <ChartSkeleton />
+                <ListSkeleton />
+              </>
+            ) : (
+              <>
+                <PerformanceChart data={performanceData} trades={tradesData} />
+                <RecentTrades data={tradesData} />
+              </>
+            )}
+          </div>
+        )}
+        
+        {activeTab === 'ai-agent' && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <AIAgentStatus />
+                <AIDecisionTester />
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'arbitrage' && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto">
+              <CrossChainOpportunities />
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'evolution' && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto">
+              <StrategyEvolution />
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'tester' && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-2xl mx-auto">
+              <AIDecisionTester />
+            </div>
+          </div>
         )}
       </div>
+      
       {lastUpdated && (
         <div className="py-2 text-sm text-center text-gray-500 border-t-2 border-black">
           Last updated:{" "}

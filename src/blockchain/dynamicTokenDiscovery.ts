@@ -1,10 +1,17 @@
 // src/blockchain/dynamicTokenDiscovery.ts
 // Dynamic token discovery and analysis module for PancakeSwap
-// Enhances trading bot with intelligent token selection
+// Uses real DexScreener API data for intelligent token selection
 
 import { ethers } from 'ethers';
 import { logger, logError } from '../utils/logger';
 import { CONFIG } from '../config';
+import { 
+  discoverTrendingTokens as getAPITrendingTokens,
+  findTradingOpportunitiesFromAPI,
+  getTokenPairs,
+  type EnhancedTokenData
+} from '../data/enhancedMarketFetcher';
+import { getDexScreenerChainId, shouldUseFallbackData } from '../utils/chainMapping';
 
 export interface TokenAnalysis {
   address: string;
@@ -50,7 +57,14 @@ export class DynamicTokenDiscovery {
   }
 
   /**
-   * Discover and analyze trending tokens
+   * Get the DexScreener chain ID for API calls
+   */
+  private getChainIdForAPI(): string {
+    return getDexScreenerChainId(this.chainId);
+  }
+
+  /**
+   * Discover and analyze trending tokens using real DexScreener API
    */
   async discoverTrendingTokens(criteria: {
     minLiquidity?: number;
@@ -59,36 +73,49 @@ export class DynamicTokenDiscovery {
     limit?: number;
   } = {}): Promise<TokenAnalysis[]> {
     try {
-      logger.info('🔍 Discovering trending tokens...');
+      logger.info('🔍 Discovering trending tokens from DexScreener API...');
       
-      // Popular tokens for BSC/opBNB (can be expanded dynamically)
-      const tokenAddresses = await this.getPopularTokenAddresses();
-      const analyzedTokens: TokenAnalysis[] = [];
+      // Use real API data
+      const enhancedTokens = await getAPITrendingTokens({
+        minLiquidity: criteria.minLiquidity || 50000,
+        minVolume: criteria.minVolume || 10000,
+        maxRiskLevel: criteria.maxRiskLevel || 'HIGH',
+        limit: criteria.limit || 20,
+        chainId: this.getChainIdForAPI()
+      });
 
-      for (const address of tokenAddresses) {
-        try {
-          const analysis = await this.analyzeToken(address);
-          
-          if (this.meetsCriteria(analysis, criteria)) {
-            analyzedTokens.push(analysis);
-          }
-        } catch (error) {
-          logger.warn(`Failed to analyze token ${address}: ${error}`);
-          continue;
-        }
-      }
+      // Convert to TokenAnalysis format
+      const analyzedTokens: TokenAnalysis[] = enhancedTokens.map(token => ({
+        address: token.address,
+        symbol: token.symbol,
+        name: token.name,
+        decimals: 18, // Default, would need contract call for exact value
+        price: parseFloat(token.priceUsd || '0'),
+        liquidity: token.liquidity,
+        volume24h: token.volume24h,
+        priceChange24h: token.priceChange24h,
+        confidence: token.confidence,
+        riskLevel: token.riskLevel,
+        tradingSignal: token.tradingSignal,
+        timestamp: Date.now()
+      }));
 
+      // Apply additional criteria filtering
+      const filtered = analyzedTokens.filter(token => this.meetsCriteria(token, criteria));
+      
       // Sort by confidence score
-      analyzedTokens.sort((a, b) => b.confidence - a.confidence);
+      filtered.sort((a, b) => b.confidence - a.confidence);
       
-      const limit = criteria.limit || 20;
-      const result = analyzedTokens.slice(0, limit);
+      const result = filtered.slice(0, criteria.limit || 20);
       
-      logger.info(`✅ Discovered ${result.length} trending tokens`);
+      logger.info(`✅ Discovered ${result.length} trending tokens from API`);
       return result;
 
     } catch (error) {
       logError('discoverTrendingTokens', error as Error);
+      
+      // Fallback: return empty array or minimal safe tokens
+      logger.warn('API failed, returning empty results');
       return [];
     }
   }
@@ -247,7 +274,7 @@ export class DynamicTokenDiscovery {
   }
 
   /**
-   * Get market data for token
+   * Get market data for token using DexScreener API
    */
   private async getMarketData(address: string): Promise<{
     price: number;
@@ -256,50 +283,33 @@ export class DynamicTokenDiscovery {
     priceChange24h: number;
   }> {
     try {
-      // TODO: Integrate with external APIs for real market data
-      // For now, using simplified calculations
+      // Get token pairs from DexScreener API
+      const pairs = await getTokenPairs(this.getChainIdForAPI(), address);
       
-      const price = await this.estimateTokenPrice(address);
-      const liquidity = await this.estimateLiquidity(address);
+      if (pairs.length === 0) {
+        throw new Error(`No pairs found for token ${address}`);
+      }
       
-      // Mock data for volume and price change (would come from APIs)
-      const volume24h = liquidity * 0.1; // Rough estimate
-      const priceChange24h = (Math.random() - 0.5) * 20; // Random -10% to +10%
-
+      // Use the pair with highest liquidity
+      const bestPair = pairs.reduce((best, current) => 
+        (current.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? current : best
+      );
+      
       return {
-        price,
-        liquidity,
-        volume24h,
-        priceChange24h,
+        price: parseFloat(bestPair.priceUsd || '0'),
+        liquidity: bestPair.liquidity?.usd || 0,
+        volume24h: bestPair.volume?.h24 || 0,
+        priceChange24h: bestPair.priceChange?.h24 || 0,
       };
     } catch (error) {
-      throw new Error(`Failed to get market data: ${error}`);
-    }
-  }
-
-  /**
-   * Estimate token price from DEX pools
-   */
-  private async estimateTokenPrice(address: string): Promise<number> {
-    try {
-      // This would use your existing PancakeSwap integration
-      // For now, returning a mock price
-      return Math.random() * 100;
-    } catch (error) {
-      return 0;
-    }
-  }
-
-  /**
-   * Estimate liquidity from pool data
-   */
-  private async estimateLiquidity(address: string): Promise<number> {
-    try {
-      // This would query actual pool liquidity
-      // For now, returning a mock value
-      return Math.random() * 1000000;
-    } catch (error) {
-      return 0;
+      // Fallback to minimal data if API fails
+      logger.warn(`Failed to get market data for ${address}: ${error}`);
+      return {
+        price: 0,
+        liquidity: 0,
+        volume24h: 0,
+        priceChange24h: 0,
+      };
     }
   }
 

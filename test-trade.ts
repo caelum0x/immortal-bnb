@@ -25,7 +25,10 @@ async function testTrade() {
     console.log('\n📊 Test 1: Wallet Balance');
     console.log('─'.repeat(60));
     const balance = await pancake.getBalance();
-    console.log(`✓ Wallet address: ${pancake['wallet'].address}`);
+    
+    // Safe wallet address access
+    const walletAddress = pancake['wallet']?.address || 'No wallet configured';
+    console.log(`✓ Wallet address: ${walletAddress}`);
     console.log(`✓ Balance: ${balance.toFixed(4)} BNB`);
     console.log(`✓ Network: ${CONFIG.TRADING_NETWORK} (Chain ID: ${CONFIG.CHAIN_ID})`);
 

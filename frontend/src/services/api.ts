@@ -58,6 +58,75 @@ export interface TokenData {
   };
 }
 
+// Immortal AI types
+export interface AIPersonality {
+  riskTolerance: number;
+  aggressiveness: number;
+  learningRate: number;
+  memoryWeight: number;
+  explorationRate: number;
+  confidenceThreshold: number;
+}
+
+export interface AIDecision {
+  action: 'BUY' | 'SELL' | 'HOLD';
+  amount: number;
+  confidence: number;
+  reasoning: string;
+  strategy: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+}
+
+export interface AIStatus {
+  status: string;
+  personality: AIPersonality;
+  memoryStats: {
+    totalMemories: number;
+    successfulTrades: number;
+    totalProfit: number;
+  };
+  successRate: number;
+  capabilities: {
+    decisionMaking: boolean;
+    memoryLearning: boolean;
+    crossChainArbitrage: boolean;
+    strategyEvolution: boolean;
+  };
+  timestamp: number;
+}
+
+export interface CrossChainOpportunity {
+  id: string;
+  sourceChain: string;
+  targetChain: string;
+  tokenSymbol: string;
+  sourcePrice: number;
+  targetPrice: number;
+  priceDifference: number;
+  profitPotential: number;
+  volume24h: number;
+  liquidity: { source: number; target: number };
+  bridgeFee: number;
+  gasCosts: { source: number; target: number };
+  executionTime: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  confidence: number;
+}
+
+export interface StrategyMetrics {
+  generation: number;
+  totalStrategies: number;
+  avgFitness: number;
+  bestFitness: number;
+  evolutionHistory: any[];
+}
+
+export interface MarketSentiment {
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  confidence: number;
+  reasoning: string;
+}
+
 class APIService {
   private baseUrl: string;
 
@@ -125,6 +194,108 @@ class APIService {
   // Get token balance
   async getTokenBalance(address: string): Promise<{ tokenAddress: string; balance: string }> {
     return this.fetch(`/api/token/${address}/balance`);
+  }
+
+  // =============================================================================
+  // IMMORTAL AI AGENT METHODS
+  // =============================================================================
+
+  // Get AI agent status and personality
+  async getAIStatus(): Promise<AIStatus> {
+    return this.fetch('/api/ai/status');
+  }
+
+  // Get AI decision for a specific token
+  async getAIDecision(tokenAddress: string, availableAmount?: number): Promise<{
+    tokenAddress: string;
+    tokenSymbol: string;
+    decision: AIDecision;
+    timestamp: number;
+  }> {
+    const response = await fetch(`${this.baseUrl}/api/ai/decision`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tokenAddress, availableAmount }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  // Get cross-chain arbitrage opportunities
+  async getCrossChainOpportunities(): Promise<{
+    opportunities: CrossChainOpportunity[];
+    count: number;
+    timestamp: number;
+  }> {
+    return this.fetch('/api/ai/crosschain');
+  }
+
+  // Get strategy evolution status and metrics
+  async getStrategyMetrics(): Promise<{
+    strategies: any[];
+    metrics: StrategyMetrics;
+    timestamp: number;
+  }> {
+    return this.fetch('/api/ai/strategies');
+  }
+
+  // Trigger strategy evolution
+  async triggerStrategyEvolution(): Promise<{ message: string; timestamp: number }> {
+    const response = await fetch(`${this.baseUrl}/api/ai/evolve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  // Analyze market sentiment for a token
+  async analyzeSentiment(tokenSymbol: string, tokenAddress?: string): Promise<{
+    tokenSymbol: string;
+    sentiment: MarketSentiment;
+    timestamp: number;
+  }> {
+    const response = await fetch(`${this.baseUrl}/api/ai/sentiment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tokenSymbol, tokenAddress }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  // Load immortal memories for AI agent
+  async loadAIMemories(): Promise<{ message: string; timestamp: number }> {
+    const response = await fetch(`${this.baseUrl}/api/ai/load-memories`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
   }
 }
 
