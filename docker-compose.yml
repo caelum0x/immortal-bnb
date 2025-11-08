@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # Backend API & Trading Bot
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: immortal-bot
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${PORT:-3001}
+      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - RPC_URL_TESTNET=${RPC_URL_TESTNET}
+      - RPC_URL_MAINNET=${RPC_URL_MAINNET}
+      - NETWORK=${NETWORK:-testnet}
+      - GREENFIELD_BUCKET_NAME=${GREENFIELD_BUCKET_NAME}
+      - GREENFIELD_ACCESS_KEY=${GREENFIELD_ACCESS_KEY}
+      - GREENFIELD_SECRET_KEY=${GREENFIELD_SECRET_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - API_KEY=${API_KEY}
+      - MAX_TRADE_AMOUNT_BNB=${MAX_TRADE_AMOUNT_BNB:-1.0}
+      - STOP_LOSS_PERCENTAGE=${STOP_LOSS_PERCENTAGE:-10}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+    volumes:
+      - ./logs:/app/logs
+      - bot-data:/app/data
+    networks:
+      - immortal-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: PostgreSQL for trade history (future enhancement)
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: immortal-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: immortal_bot
+  #     POSTGRES_USER: bot
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   networks:
+  #     - immortal-network
+  #   ports:
+  #     - "5432:5432"
+
+  # Optional: Redis for caching (future enhancement)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: immortal-redis
+  #   restart: unless-stopped
+  #   networks:
+  #     - immortal-network
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+
+volumes:
+  bot-data:
+    driver: local
+  # postgres-data:
+  #   driver: local
+  # redis-data:
+  #   driver: local
+
+networks:
+  immortal-network:
+    driver: bridge

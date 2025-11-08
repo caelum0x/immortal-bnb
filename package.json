@@ -9,7 +9,17 @@
     "dev:frontend": "bun --cwd apps/frontend dev",
     "build": "bun build src/index.ts --outdir dist --target node",
     "test": "bun test",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint src/**/*.ts",
+    "healthcheck": "bun run scripts/healthcheck.ts",
+    "monitor": "bun run scripts/monitor.ts",
+    "monitor:watch": "bun run scripts/monitor.ts --watch",
+    "backup": "bash scripts/backup.sh",
+    "setup": "bash scripts/setup.sh",
+    "docker:build": "docker build -t immortal-bot .",
+    "docker:run": "docker-compose up -d",
+    "docker:stop": "docker-compose down",
+    "docker:logs": "docker-compose logs -f bot",
+    "validate": "npx ts-node scripts/validate-deployment.ts"
   },
   "keywords": [
     "ai",
