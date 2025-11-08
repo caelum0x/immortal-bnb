@@ -1,17 +1,18 @@
 /**
- * Dashboard Component
+ * Production Dashboard Component
  * Main control panel for starting/stopping bot and configuring trading parameters
  */
 
 'use client';
 
 import { useState, useEffect } from 'react';
-import { startBot, stopBot, getBotStatus, safeApiCall, BotStatus } from '@/lib/api';
+import { startBot, stopBot, getBotStatus, isBackendAvailable, BotStatus } from '@/lib/api';
 
 export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
-  const [isMock, setIsMock] = useState(false);
+  const [backendAvailable, setBackendAvailable] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Form state
   const [tokenInputs, setTokenInputs] = useState<string[]>(['']);
@@ -19,13 +20,34 @@ export default function Dashboard() {
 
   // Load bot status on mount
   useEffect(() => {
+    checkBackend();
     loadBotStatus();
   }, []);
 
+  const checkBackend = async () => {
+    const available = await isBackendAvailable();
+    setBackendAvailable(available);
+    if (!available) {
+      setError('Backend server is not running. Please start the API server.');
+    }
+  };
+
   const loadBotStatus = async () => {
-    const { data, isMock } = await safeApiCall(
-      () => getBotStatus(),
-      {
+    try {
+      const status = await getBotStatus();
+      setBotStatus(status);
+      setError(null);
+
+      if (status.watchlist.length > 0) {
+        setTokenInputs(status.watchlist);
+      }
+      if (status.riskLevel) {
+        setRiskLevel(status.riskLevel);
+      }
+    } catch (err: any) {
+      console.error('Failed to load bot status:', err);
+      // Set default values if backend not available
+      setBotStatus({
         running: false,
         watchlist: [],
         riskLevel: 5,
@@ -34,15 +56,7 @@ export default function Dashboard() {
           stopLoss: 10,
           network: 'testnet',
         },
-      }
-    );
-    setBotStatus(data);
-    setIsMock(isMock);
-    if (data.watchlist.length > 0) {
-      setTokenInputs(data.watchlist);
-    }
-    if (data.riskLevel) {
-      setRiskLevel(data.riskLevel);
+      });
     }
   };
 
@@ -64,14 +78,20 @@ export default function Dashboard() {
   };
 
   const handleStartBot = async () => {
+    if (!backendAvailable) {
+      setError('Cannot start bot: Backend server is not running');
+      return;
+    }
+
     setIsLoading(true);
+    setError(null);
+
     try {
       // Filter out empty token addresses
       const validTokens = tokenInputs.filter((t) => t.trim() !== '');
 
       if (validTokens.length === 0) {
-        alert('Please add at least one token address');
-        return;
+        setError('Please add at least one token address or leave empty to auto-discover');
       }
 
       const response = await startBot({
@@ -80,30 +100,37 @@ export default function Dashboard() {
       });
 
       console.log('Bot started:', response);
-      alert(`Bot started successfully! Monitoring ${validTokens.length} tokens with risk level ${riskLevel}`);
+      setError(null);
 
       // Reload status
       await loadBotStatus();
-    } catch (error) {
-      console.error('Failed to start bot:', error);
-      alert('Failed to start bot. Check console for details.');
+    } catch (err: any) {
+      console.error('Failed to start bot:', err);
+      setError(err.message || 'Failed to start bot');
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleStopBot = async () => {
+    if (!backendAvailable) {
+      setError('Cannot stop bot: Backend server is not running');
+      return;
+    }
+
     setIsLoading(true);
+    setError(null);
+
     try {
       const response = await stopBot();
       console.log('Bot stopped:', response);
-      alert('Bot stopped successfully!');
+      setError(null);
 
       // Reload status
       await loadBotStatus();
-    } catch (error) {
-      console.error('Failed to stop bot:', error);
-      alert('Failed to stop bot. Check console for details.');
+    } catch (err: any) {
+      console.error('Failed to stop bot:', err);
+      setError(err.message || 'Failed to stop bot');
     } finally {
       setIsLoading(false);
     }
@@ -123,17 +150,27 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Mock Data Warning */}
-      {isMock && (
-        <div className="bg-yellow-900/30 border border-yellow-500 rounded-lg p-4">
+      {/* Backend Status Warning */}
+      {!backendAvailable && (
+        <div className="bg-red-900/30 border border-red-500 rounded-lg p-4">
           <div className="flex items-center">
             <span className="text-2xl mr-3">⚠️</span>
             <div>
-              <p className="font-semibold text-yellow-500">Using Mock Data</p>
+              <p className="font-semibold text-red-500">Backend Server Not Running</p>
               <p className="text-sm text-gray-300">
-                Backend API is unavailable. Connect the backend server to enable real trading.
+                Start the API server: <code className="bg-black/50 px-2 py-1 rounded">npm run dev</code>
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-500 rounded-lg p-4">
+          <div className="flex items-center">
+            <span className="text-xl mr-3">❌</span>
+            <p className="text-red-400">{error}</p>
           </div>
         </div>
       )}
@@ -158,7 +195,11 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
               <p className="text-gray-400">Monitoring</p>
-              <p className="font-semibold">{botStatus.watchlist.length} tokens</p>
+              <p className="font-semibold">
+                {botStatus.watchlist.length > 0
+                  ? `${botStatus.watchlist.length} tokens`
+                  : 'Auto-discovering'}
+              </p>
             </div>
             <div>
               <p className="text-gray-400">Risk Level</p>
@@ -258,7 +299,7 @@ export default function Dashboard() {
           {!botStatus?.running ? (
             <button
               onClick={handleStartBot}
-              disabled={isLoading}
+              disabled={isLoading || !backendAvailable}
               className="btn-primary flex-1 text-lg py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? '⏳ Starting...' : '🚀 Start Trading Bot'}
@@ -266,7 +307,7 @@ export default function Dashboard() {
           ) : (
             <button
               onClick={handleStopBot}
-              disabled={isLoading}
+              disabled={isLoading || !backendAvailable}
               className="btn-danger flex-1 text-lg py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? '⏳ Stopping...' : '🛑 Stop Bot'}
@@ -275,7 +316,7 @@ export default function Dashboard() {
         </div>
 
         <p className="text-xs text-gray-400 mt-4 text-center">
-          ⚠️ The bot will execute real trades with your wallet. Monitor closely!
+          ⚠️ The bot will execute real trades with your configured wallet. Monitor closely!
         </p>
       </div>
 
