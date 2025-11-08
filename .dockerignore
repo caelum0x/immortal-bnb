@@ -1,0 +1,62 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+bun.lockb
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Development files
+.git
+.github
+.vscode
+.idea
+
+# Logs
+logs
+*.log
+
+# Build artifacts
+dist
+build
+.next
+out
+
+# Test files
+test
+tests
+__tests__
+*.test.ts
+*.test.js
+coverage
+
+# Documentation
+*.md
+!README.md
+docs
+
+# Frontend (build separately)
+apps/frontend/node_modules
+apps/frontend/.next
+apps/frontend/out
+
+# Cache
+.cache
+.turbo
+.eslintcache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Hardhat
+cache
+artifacts
+
+# Temporary files
+tmp
+temp
+*.tmp
