@@ -51,7 +51,70 @@
 
 **What you need to do:**
 
-#### Option 1: Remix IDE (Recommended - Easiest!)
+#### Option 1: Foundry (RECOMMENDED - Fastest & Automated!)
+
+**⚡ NEW: One-command deployment with Foundry**
+
+**Time:** 20-30 minutes (2 min install + 5 min deploy + setup)
+
+1. **Install Foundry** (2 minutes):
+   ```bash
+   curl -L https://foundry.paradigm.xyz | bash
+   foundryup
+   ```
+
+2. **Set private key in .env** (2 minutes):
+   ```bash
+   WALLET_PRIVATE_KEY=0xYOUR_KEY_HERE
+   ```
+
+3. **Get testnet BNB** (5 minutes):
+   - Visit: https://testnet.bnbchain.org/faucet-smart
+   - Request 0.1 tBNB
+
+4. **Deploy with one command** (5 minutes):
+   ```bash
+   bash scripts/foundry-deploy.sh
+   # OR
+   npm run contracts:deploy
+   ```
+
+   Script automatically:
+   - ✅ Deploys IMMBotToken
+   - ✅ Deploys Staking contract
+   - ✅ Links them together
+   - ✅ Saves addresses to deployment.json
+   - ✅ Shows BscScan links
+
+5. **Update environment files** (5 minutes):
+   ```bash
+   # .env
+   IMMBOT_TOKEN_ADDRESS=0x... # from deployment output
+   STAKING_CONTRACT_ADDRESS=0x... # from deployment output
+
+   # apps/frontend/.env.local
+   NEXT_PUBLIC_IMMBOT_TOKEN_TESTNET=0x...
+   NEXT_PUBLIC_STAKING_TESTNET=0x...
+   ```
+
+6. **Restart & test** (1 minute):
+   ```bash
+   bun run dev                      # Backend
+   cd apps/frontend && npm run dev  # Frontend
+   ```
+
+**📚 Full guide**: See `DEPLOY_WITH_FOUNDRY.md`
+
+**Why Foundry?**
+- ⚡ Fastest deployment method
+- 🤖 Fully automated script
+- ✅ No ESM/CommonJS conflicts
+- 🔧 Built-in verification
+- 📊 Shows gas costs
+
+---
+
+#### Option 2: Remix IDE (Easiest for Beginners!)
 
 1. **Get testnet BNB** (2 minutes):
    - Visit: https://testnet.bnbchain.org/faucet-smart
@@ -101,7 +164,9 @@
 
 **📚 Detailed Guide**: See `DEPLOY_CONTRACTS.md` for full step-by-step instructions
 
-#### Option 2: Hardhat (Advanced)
+---
+
+#### Option 3: Hardhat (Advanced)
 
 See `DEPLOY_CONTRACTS.md` - Option A for Hardhat deployment in separate environment.
 
@@ -235,14 +300,22 @@ useWaitForTransaction({
 
 ## 🚀 Quick Start (For You)
 
-### Fastest Path to Working Staking (45 minutes):
+### Fastest Path to Working Staking (20-30 minutes):
 
-1. **Get tBNB** (5 min)
-2. **Deploy with Remix** (30 min - following DEPLOY_CONTRACTS.md)
-3. **Update .env files** (5 min)
-4. **Restart & test** (5 min)
+**RECOMMENDED: Foundry (Automated)**
+1. **Install Foundry** (2 min)
+2. **Get tBNB** (5 min)
+3. **Run deployment script** (5 min)
+4. **Update .env files** (5 min)
+5. **Restart & test** (5 min)
 
-**Total**: ~45 minutes to fully working staking!
+**Total**: ~20-30 minutes to fully working staking!
+
+**Alternative: Remix IDE (Manual but Easy)**
+- Takes ~45 minutes
+- Good for first-timers
+- Browser-based, no installation
+- See Option 2 above
 
 ---
 
@@ -313,10 +386,26 @@ A **production-ready** AI trading bot with:
 
 ---
 
-**Next Step**: Open `DEPLOY_CONTRACTS.md` and follow Option B (Remix) for easiest deployment!
+**🎯 RECOMMENDED Next Step**:
 
-**Time to Working Staking**: ~45 minutes from now
+**Option 1 (Fastest):** Open `DEPLOY_WITH_FOUNDRY.md` for automated deployment!
+```bash
+# Install Foundry
+curl -L https://foundry.paradigm.xyz | bash && foundryup
 
-**Questions?** Check the troubleshooting section in DEPLOY_CONTRACTS.md
+# Deploy (after setting WALLET_PRIVATE_KEY in .env)
+npm run contracts:deploy
+```
+
+**Option 2 (Easiest):** Open `DEPLOY_CONTRACTS.md` and follow Option B (Remix) for manual deployment!
+
+**Time to Working Staking**:
+- Foundry: ~20-30 minutes
+- Remix: ~45 minutes
+
+**Questions?** Check:
+- `DEPLOY_WITH_FOUNDRY.md` - Foundry guide
+- `DEPLOY_CONTRACTS.md` - Remix/Hardhat guides
+- Troubleshooting sections in each guide
 
 Good luck! 🚀

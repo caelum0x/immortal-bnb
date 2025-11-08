@@ -22,7 +22,11 @@
     "validate": "npx ts-node scripts/validate-deployment.ts",
     "perf": "bun run scripts/performance.ts --current",
     "perf:report": "bun run scripts/performance.ts --report",
-    "perf:collect": "bun run scripts/performance.ts --collect"
+    "perf:collect": "bun run scripts/performance.ts --collect",
+    "contracts:build": "forge build",
+    "contracts:test": "forge test",
+    "contracts:deploy": "bash scripts/foundry-deploy.sh",
+    "contracts:deploy-manual": "bun run scripts/deploy-contracts.ts"
   },
   "keywords": [
     "ai",

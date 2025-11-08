@@ -248,23 +248,34 @@ The bot learns by:
 
 ### Deploy Contracts
 
-**Quick deployment using Hardhat scripts:**
+**⚡ Recommended: Foundry (Fastest - One Command!)**
 
 ```bash
-# 1. Setup contract environment
-bash scripts/setup-contracts.sh
+# 1. Install Foundry
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
 
-# 2. Compile contracts
-npx hardhat compile
+# 2. Set private key in .env
+WALLET_PRIVATE_KEY=0xYOUR_KEY_HERE
 
-# 3. Deploy to testnet
-npx hardhat run scripts/deploy-token.ts --network bscTestnet
-npx hardhat run scripts/deploy-staking.ts --network bscTestnet
+# 3. Get testnet BNB from faucet
+# https://testnet.bnbchain.org/faucet-smart
 
-# 4. Verify on BscScan
-npx hardhat verify --network bscTestnet <TOKEN_ADDRESS> 1000000000
-npx hardhat verify --network bscTestnet <STAKING_ADDRESS> <TOKEN_ADDRESS>
+# 4. Deploy with one command
+npm run contracts:deploy
+# OR
+bash scripts/foundry-deploy.sh
 ```
+
+**Alternative: Remix IDE (Easiest for Beginners)**
+- Browser-based, no installation
+- Copy contracts to https://remix.ethereum.org
+- Deploy manually with MetaMask
+- See `DEPLOY_CONTRACTS.md` for step-by-step
+
+**Alternative: Hardhat (Advanced)**
+- Requires separate Node.js environment
+- See `DEPLOY_CONTRACTS.md` - Option A
 
 **Update `.env` with deployed addresses:**
 ```bash
@@ -272,7 +283,10 @@ IMMBOT_TOKEN_ADDRESS=0x...
 STAKING_CONTRACT_ADDRESS=0x...
 ```
 
-📖 **Detailed guide**: See [contracts/README.md](contracts/README.md) for complete deployment documentation
+📖 **Detailed guides**:
+- **Foundry**: [DEPLOY_WITH_FOUNDRY.md](DEPLOY_WITH_FOUNDRY.md) ⭐ Recommended
+- **Remix/Hardhat**: [DEPLOY_CONTRACTS.md](DEPLOY_CONTRACTS.md)
+- **Status & Options**: [DEPLOYMENT_STATUS.md](DEPLOYMENT_STATUS.md)
 
 ## 📊 Configuration
 
