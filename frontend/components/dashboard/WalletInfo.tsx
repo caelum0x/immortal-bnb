@@ -4,21 +4,61 @@ import { useWeb3 } from '@/components/providers/Web3Provider'
 import { useWalletInfo } from '@/lib/hooks'
 
 export default function WalletInfo() {
-  const { isConnected, address } = useWeb3()
-  const { balance, usdValue, network, isLoading, error } = useWalletInfo(address)
+  const { isConnected, address, connect, isConnecting, error: web3Error, network, balance } = useWeb3()
+  const { balance: apiBalance, usdValue, isLoading, error } = useWalletInfo(address)
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-white">Wallet Info</h2>
-        {isConnected && (
+        {isConnected ? (
           <div className="text-xs text-green-400 bg-green-500/20 px-2 py-1 rounded">
             Connected
+          </div>
+        ) : (
+          <div className="text-xs text-gray-400 bg-gray-500/20 px-2 py-1 rounded">
+            Not Connected
           </div>
         )}
       </div>
 
-      {isConnected ? (
+      {!isConnected ? (
+        <div className="text-center space-y-4">
+          <div className="text-gray-400 text-sm mb-4">
+            Connect your wallet to view balance and trading information
+          </div>
+          
+          <button
+            onClick={connect}
+            disabled={isConnecting}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 
+                     disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed
+                     text-white font-medium py-3 px-6 rounded-lg transition-all duration-200
+                     transform hover:scale-105 disabled:transform-none"
+          >
+            {isConnecting ? (
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>Connecting...</span>
+              </div>
+            ) : (
+              'Connect Wallet'
+            )}
+          </button>
+
+          {web3Error && (
+            <div className="bg-red-500/20 border border-red-500/30 text-red-400 p-3 rounded-lg text-sm">
+              {web3Error}
+            </div>
+          )}
+
+          <div className="text-xs text-gray-500 space-y-1">
+            <p>Supported wallets:</p>
+            <p>• MetaMask • Trust Wallet • WalletConnect</p>
+            <p>• Coinbase Wallet • Brave Wallet</p>
+          </div>
+        </div>
+      ) : (
         <div className="space-y-4">
           {/* Error Display */}
           {error && (
@@ -49,7 +89,7 @@ export default function WalletInfo() {
               {/* Balance */}
               <div>
                 <div className="text-sm text-slate-400 mb-1">BNB Balance</div>
-                <div className="text-2xl font-bold text-white">{balance} BNB</div>
+                <div className="text-2xl font-bold text-white">{balance || apiBalance} BNB</div>
                 <div className="text-sm text-slate-400">${usdValue} USD</div>
               </div>
 
@@ -89,15 +129,6 @@ export default function WalletInfo() {
               </div>
             </>
           )}
-        </div>
-      ) : (
-        <div className="text-center py-8">
-          <div className="text-slate-400 mb-4">
-            Connect your wallet to view balance and start trading
-          </div>
-          <div className="text-sm text-slate-500">
-            MetaMask, Trust Wallet, and other Web3 wallets supported
-          </div>
         </div>
       )}
     </div>

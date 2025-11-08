@@ -13,7 +13,7 @@ export default function PerformanceChart() {
     stats,
     isLoading, 
     error 
-  } = usePerformanceData(timeframe)
+  } = usePerformanceData()
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg p-6">

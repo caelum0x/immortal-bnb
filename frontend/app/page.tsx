@@ -4,6 +4,7 @@ import BotStatus from '@/components/dashboard/BotStatus'
 import TradingHistory from '@/components/dashboard/TradingHistory'
 import WalletInfo from '@/components/dashboard/WalletInfo'
 import PerformanceChart from '@/components/dashboard/PerformanceChart'
+import SetupGuide from '@/components/dashboard/SetupGuide'
 
 export default function Home() {
   return (
@@ -45,6 +46,9 @@ export default function Home() {
 
         {/* Dashboard */}
         <section className="space-y-8">
+          {/* Setup Guide */}
+          <SetupGuide />
+          
           {/* Status Row */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">

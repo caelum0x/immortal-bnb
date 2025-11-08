@@ -28,45 +28,80 @@ class APIClient {
       return response.json();
     } catch (error) {
       console.error(`API request failed for ${endpoint}:`, error);
+      
+      // Return mock data for development when backend is not configured
+      if (error instanceof Error && error.message.includes('fetch')) {
+        console.warn('🔄 Backend not available, using mock data for development');
+        return this.getMockData(endpoint) as T;
+      }
+      
       throw error;
     }
   }
 
-  // Bot Status API
+  private getMockData(endpoint: string): any {
+    // Provide mock data when backend is not configured
+    if (endpoint.includes('/api/status')) {
+      return {
+        status: 'demo',
+        message: 'Backend not configured - Demo Mode',
+        walletConnected: false,
+        aiEnabled: false,
+        needsSetup: true
+      };
+    }
+
+    if (endpoint.includes('/api/wallet/balance')) {
+      return {
+        balance: '0.0000',
+        usdValue: '0.00',
+        network: 'Not Connected',
+        address: 'Connect Wallet First'
+      };
+    }
+
+    if (endpoint.includes('/api/trades')) {
+      return {
+        trades: [],
+        total: 0,
+        message: 'No trades available - Configure wallet first'
+      };
+    }
+
+    if (endpoint.includes('/api/stats')) {
+      return {
+        totalTrades: 0,
+        successRate: 0,
+        totalProfit: '0.00',
+        needsConfiguration: true
+      };
+    }
+
+    return { error: 'Backend not configured', needsSetup: true };
+  }
+
+  // Bot Status API - Updated to match backend endpoints
   async getBotStatus() {
     return this.request<{
-      status: 'running' | 'stopped' | 'error';
-      lastAction: string;
-      totalTrades: number;
-      successRate: number;
-      currentAction: string;
-      uptime: number;
-    }>('/api/bot/status');
+      status: 'running' | 'stopped' | 'error' | 'demo';
+      message: string;
+      walletConnected?: boolean;
+      aiEnabled?: boolean;
+      needsSetup?: boolean;
+    }>('/api/status');
   }
 
-  async startBot() {
-    return this.request<{ success: boolean; message: string }>('/api/bot/start', {
-      method: 'POST',
-    });
-  }
-
-  async stopBot() {
-    return this.request<{ success: boolean; message: string }>('/api/bot/stop', {
-      method: 'POST',
-    });
-  }
-
-  // Wallet API
-  async getWalletInfo(address: string) {
+  // Wallet API - Updated to match backend
+  async getWalletBalance() {
     return this.request<{
       balance: string;
       usdValue: string;
       network: string;
       address: string;
-    }>(`/api/wallet/${address}`);
+    }>('/api/wallet/balance');
   }
 
-  // Trading History API
+  // Trading History API - Updated to match backend
   async getTradingHistory(limit = 20) {
     return this.request<{
       trades: Array<{
@@ -84,18 +119,33 @@ class APIClient {
     }>(`/api/trades?limit=${limit}`);
   }
 
-  // Performance API
-  async getPerformanceData(timeframe = '24h') {
+  // Performance API - Updated to match backend stats endpoint
+  async getPerformanceData() {
     return this.request<{
+      totalTrades: number;
+      successRate: number;
       totalProfit: string;
-      profitChange: string;
-      chartData: Array<{ time: string; value: number }>;
-      stats: {
-        todayProfit: string;
-        todayTrades: number;
-        todayWinRate: number;
-      };
-    }>(`/api/performance?timeframe=${timeframe}`);
+      needsConfiguration?: boolean;
+    }>('/api/stats');
+  }
+
+  // Bot Control API (for future implementation)
+  async startBot() {
+    return this.request<{ success: boolean; message: string }>('/api/bot/start', {
+      method: 'POST',
+    });
+  }
+
+  async stopBot() {
+    return this.request<{ success: boolean; message: string }>('/api/bot/stop', {
+      method: 'POST',
+    });
+  }
+
+  // Wallet Info API (compatibility method)
+  async getWalletInfo(address?: string) {
+    // Redirect to wallet balance endpoint since backend uses that
+    return this.getWalletBalance();
   }
 
   // Dashboard Stats API
@@ -171,7 +221,7 @@ export const api = {
 
   // Trading operations
   getTradingHistory: (limit?: number) => apiClient.getTradingHistory(limit),
-  getPerformanceData: (timeframe?: string) => apiClient.getPerformanceData(timeframe),
+  getPerformanceData: () => apiClient.getPerformanceData(),
 
   // Dashboard operations
   getDashboardStats: () => apiClient.getDashboardStats(),

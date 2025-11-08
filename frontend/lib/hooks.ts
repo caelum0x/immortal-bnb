@@ -6,12 +6,11 @@ import { api } from './api'
 // Custom hook for bot status
 export function useBotStatus() {
   const [data, setData] = useState({
-    status: 'stopped' as 'running' | 'stopped' | 'error',
-    lastAction: 'Bot is offline',
-    totalTrades: 0,
-    successRate: 0,
-    currentAction: '',
-    uptime: 0,
+    status: 'stopped' as 'running' | 'stopped' | 'error' | 'demo',
+    message: 'Loading...',
+    walletConnected: false,
+    aiEnabled: false,
+    needsSetup: false,
     isLoading: true,
     error: null as string | null,
   });
@@ -30,6 +29,9 @@ export function useBotStatus() {
     } catch (error) {
       setData(prev => ({ 
         ...prev, 
+        status: 'demo',
+        message: 'Backend not configured - Demo Mode',
+        needsSetup: true,
         isLoading: false, 
         error: (error as Error).message 
       }));
@@ -37,7 +39,7 @@ export function useBotStatus() {
   }, []);
 
   const toggleBot = useCallback(async () => {
-    if (isToggling) return;
+    if (isToggling || data.needsSetup) return;
     
     setIsToggling(true);
     try {
@@ -169,10 +171,12 @@ export function useTradingHistory(limit = 20) {
 }
 
 // Custom hook for performance data
-export function usePerformanceData(timeframe = '24h') {
+export function usePerformanceData() {
   const [data, setData] = useState({
     totalProfit: '0.00',
     profitChange: '0.00',
+    totalTrades: 0,
+    successRate: 0,
     chartData: [] as { time: string; value: number }[],
     stats: {
       todayProfit: '0.00',
@@ -181,25 +185,41 @@ export function usePerformanceData(timeframe = '24h') {
     },
     isLoading: true,
     error: null as string | null,
+    needsConfiguration: false,
   });
 
   const fetchPerformance = useCallback(async () => {
     try {
       setData(prev => ({ ...prev, isLoading: true, error: null }));
-      const result = await api.getPerformanceData(timeframe);
-      setData({
-        ...result,
+      const result = await api.getPerformanceData();
+      
+      // Transform backend data to frontend format
+      const transformedData = {
+        totalProfit: result.totalProfit || '0.00',
+        profitChange: '0.00', // Calculate from historical data if available
+        totalTrades: result.totalTrades || 0,
+        successRate: result.successRate || 0,
+        chartData: [], // Mock data for now
+        stats: {
+          todayProfit: '0.00',
+          todayTrades: result.totalTrades || 0,
+          todayWinRate: result.successRate || 0,
+        },
         isLoading: false,
         error: null,
-      });
+        needsConfiguration: result.needsConfiguration || false,
+      };
+      
+      setData(transformedData);
     } catch (error) {
       setData(prev => ({
         ...prev,
         isLoading: false,
         error: (error as Error).message,
+        needsConfiguration: true,
       }));
     }
-  }, [timeframe]);
+  }, []);
 
   useEffect(() => {
     fetchPerformance();

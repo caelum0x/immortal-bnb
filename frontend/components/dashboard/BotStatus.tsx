@@ -5,9 +5,10 @@ import { useBotStatus } from '@/lib/hooks'
 export default function BotStatus() {
   const {
     status,
-    lastAction,
-    totalTrades,
-    successRate,
+    message,
+    walletConnected,
+    aiEnabled,
+    needsSetup,
     isLoading,
     error,
     isToggling,
@@ -19,6 +20,7 @@ export default function BotStatus() {
       case 'running': return 'text-green-400'
       case 'stopped': return 'text-yellow-400'
       case 'error': return 'text-red-400'
+      case 'demo': return 'text-blue-400'
       default: return 'text-slate-400'
     }
   }
@@ -28,7 +30,18 @@ export default function BotStatus() {
       case 'running': return 'bg-green-500/20 border-green-500/30'
       case 'stopped': return 'bg-yellow-500/20 border-yellow-500/30'
       case 'error': return 'bg-red-500/20 border-red-500/30'
+      case 'demo': return 'bg-blue-500/20 border-blue-500/30'
       default: return 'bg-slate-500/20 border-slate-500/30'
+    }
+  }
+
+  const getStatusText = () => {
+    switch (status) {
+      case 'running': return 'Running'
+      case 'stopped': return 'Stopped'
+      case 'error': return 'Error'
+      case 'demo': return 'Demo Mode'
+      default: return 'Unknown'
     }
   }
 
@@ -38,11 +51,30 @@ export default function BotStatus() {
         <h2 className="text-xl font-semibold text-white">Bot Status</h2>
         <div className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBg()} ${getStatusColor()}`}>
           <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${status === 'running' ? 'bg-green-500 animate-pulse' : status === 'error' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
-            <span className="capitalize">{status}</span>
+            <div className={`w-2 h-2 rounded-full ${status === 'running' ? 'bg-green-500 animate-pulse' : status === 'error' ? 'bg-red-500' : status === 'demo' ? 'bg-blue-500' : 'bg-yellow-500'}`}></div>
+            <span>{getStatusText()}</span>
           </div>
         </div>
       </div>
+
+      {/* Setup Required Notice */}
+      {needsSetup && (
+        <div className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 p-4 rounded-lg mb-4">
+          <div className="flex items-center space-x-2 mb-2">
+            <div className="w-5 h-5">⚠️</div>
+            <span className="font-medium">Configuration Required</span>
+          </div>
+          <div className="text-sm text-yellow-300 space-y-1">
+            <p>To start trading, please configure:</p>
+            <ul className="list-disc list-inside ml-4 space-y-1">
+              <li>Wallet Private Key (WALLET_PRIVATE_KEY)</li>
+              <li>OpenRouter AI API Key (OPENROUTER_API_KEY)</li>
+              <li>Telegram Bot Token (TELEGRAM_BOT_TOKEN) - optional</li>
+            </ul>
+            <p className="mt-2 text-xs">Create a <code>.env</code> file in the project root with your configuration.</p>
+          </div>
+        </div>
+      )}
 
       {/* Error Display */}
       {error && (
@@ -51,75 +83,85 @@ export default function BotStatus() {
         </div>
       )}
 
+      {/* Status Message */}
+      <div className="mb-4">
+        <div className="text-sm text-slate-400 mb-1">Status</div>
+        <div className="text-white">{message}</div>
+      </div>
+
+      {/* Configuration Status */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-slate-900/50 rounded-lg p-3">
+          <div className="flex items-center space-x-2 mb-1">
+            <div className={`w-2 h-2 rounded-full ${walletConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span className="text-sm text-slate-300">Wallet</span>
+          </div>
+          <span className="text-xs text-slate-400">
+            {walletConnected ? 'Connected' : 'Not configured'}
+          </span>
+        </div>
+        <div className="bg-slate-900/50 rounded-lg p-3">
+          <div className="flex items-center space-x-2 mb-1">
+            <div className={`w-2 h-2 rounded-full ${aiEnabled ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span className="text-sm text-slate-300">AI Engine</span>
+          </div>
+          <span className="text-xs text-slate-400">
+            {aiEnabled ? 'Ready' : 'API key needed'}
+          </span>
+        </div>
+      </div>
+
       {/* Loading State */}
       {isLoading ? (
-        <div className="space-y-4 mb-6">
-          <div className="animate-pulse">
-            <div className="h-4 bg-slate-700 rounded w-3/4 mb-2"></div>
-            <div className="h-6 bg-slate-700 rounded w-1/2"></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-slate-900/50 rounded-lg p-4 animate-pulse">
-              <div className="h-8 bg-slate-700 rounded mb-2"></div>
-              <div className="h-4 bg-slate-700 rounded"></div>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4 animate-pulse">
-              <div className="h-8 bg-slate-700 rounded mb-2"></div>
-              <div className="h-4 bg-slate-700 rounded"></div>
-            </div>
-          </div>
+        <div className="text-center py-4">
+          <div className="w-6 h-6 border-2 border-slate-400 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+          <div className="text-sm text-slate-400">Loading status...</div>
         </div>
       ) : (
-        <>
-          {/* Main Status Display */}
-          <div className="space-y-4 mb-6">
-            <div>
-              <div className="text-sm text-slate-400 mb-1">Current Action</div>
-              <div className="text-white font-medium">{lastAction}</div>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-900/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-white">{totalTrades}</div>
-                <div className="text-sm text-slate-400">Total Trades</div>
+        <div className="space-y-4">
+          {/* Control Button */}
+          <button
+            onClick={toggleBot}
+            disabled={needsSetup || isToggling}
+            className={`w-full py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
+              needsSetup 
+                ? 'bg-gray-500/20 text-gray-400 cursor-not-allowed' 
+                : status === 'running'
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
+                  : 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
+            }`}
+          >
+            {isToggling ? (
+              <div className="flex items-center justify-center space-x-2">
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                <span>Processing...</span>
               </div>
-              <div className="bg-slate-900/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-green-400">{successRate}%</div>
-                <div className="text-sm text-slate-400">Success Rate</div>
+            ) : needsSetup ? (
+              'Configure Bot First'
+            ) : status === 'running' ? (
+              'Stop Bot'
+            ) : (
+              'Start Bot'
+            )}
+          </button>
+
+          {/* Quick Stats */}
+          {!needsSetup && (
+            <div className="grid grid-cols-2 gap-4 text-center">
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <div className="text-sm text-slate-400">Mode</div>
+                <div className="text-white font-medium">
+                  {status === 'demo' ? 'Demo' : 'Live Trading'}
+                </div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <div className="text-sm text-slate-400">Network</div>
+                <div className="text-white font-medium">BNB Chain</div>
               </div>
             </div>
-          </div>
-        </>
-      )}
-
-      {/* Control Button */}
-      <div className="space-y-4">
-        <button
-          onClick={toggleBot}
-          disabled={isToggling || isLoading}
-          className={`w-full py-3 px-4 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-            status === 'running' 
-              ? 'bg-red-500 hover:bg-red-600 text-white' 
-              : 'bg-green-500 hover:bg-green-600 text-white'
-          }`}
-        >
-          {isToggling ? (
-            <div className="flex items-center justify-center space-x-2">
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>{status === 'running' ? 'Stopping...' : 'Starting...'}</span>
-            </div>
-          ) : (
-            status === 'running' ? 'Stop Bot' : 'Start Bot'
           )}
-        </button>
-
-        {status === 'running' && (
-          <div className="text-xs text-slate-400 text-center">
-            Bot is actively monitoring the market and will execute trades when opportunities are found.
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
