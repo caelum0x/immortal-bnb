@@ -1,69 +1,42 @@
-# Multi-stage Dockerfile for Immortal AI Trading Bot
-# Optimized for production deployment
+# Dockerfile
+# Multi-stage build for Immortal AI Trading Bot
 
-# ===================================
-# Stage 1: Base Image
-# ===================================
-FROM oven/bun:1 AS base
+FROM oven/bun:1 as base
 WORKDIR /app
 
-# ===================================
-# Stage 2: Dependencies
-# ===================================
+# Install dependencies
 FROM base AS deps
-
-# Copy package files
-COPY package.json bun.lockb* ./
-
-# Install production dependencies only
-RUN bun install --frozen-lockfile --production
-
-# ===================================
-# Stage 3: Build (if needed)
-# ===================================
-FROM base AS builder
-
-# Copy package files and install all dependencies
 COPY package.json bun.lockb* ./
 RUN bun install --frozen-lockfile
 
-# Copy source code
+# Build application
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build TypeScript (optional - Bun can run TS directly)
-# RUN bun build src/index.ts --outdir dist --target node
+# Build TypeScript
+RUN bun build src/index.ts --outdir ./dist --target node
 
-# ===================================
-# Stage 4: Runtime
-# ===================================
-FROM base AS runner
+# Production image
+FROM oven/bun:1-slim AS runner
+WORKDIR /app
 
-# Set production environment
 ENV NODE_ENV=production
-ENV PORT=3001
 
-# Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 botuser
+# Copy necessary files
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 
-# Copy dependencies from deps stage
-COPY --from=deps --chown=botuser:nodejs /app/node_modules ./node_modules
-
-# Copy application code
-COPY --chown=botuser:nodejs . .
-
-# Create logs directory
-RUN mkdir -p logs && chown -R botuser:nodejs logs
-
-# Switch to non-root user
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 botuser
 USER botuser
 
-# Expose API port
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD bun run healthcheck.ts || exit 1
+
 EXPOSE 3001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD bun run healthcheck || exit 1
-
-# Start the application
 CMD ["bun", "run", "src/index.ts"]

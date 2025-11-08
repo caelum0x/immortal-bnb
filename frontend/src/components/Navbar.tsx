@@ -4,12 +4,12 @@ export default function Navbar() {
       <div className="mx-auto max-w-[95vw] px-2">
         <div className="flex h-10 md:h-14 items-center justify-between font-bold">
           <div className="flex items-center">
-            <a href="/">ALPHA ARENA
-              {/* <img
-                src="/logos/alpha_logo.png"
-                alt="Alpha Arena"
-                className="h-8 md:h-12 w-auto -ml-2 md:ml-0 cursor-pointer"
-              /> */}
+            <a href="/" className="flex items-center">
+              <span className="text-2xl mr-2">🤖</span>
+              <span className="text-lg">IMMORTAL AI BOT</span>
+              <span className="ml-2 text-xs bg-gradient-to-r from-purple-500 to-blue-500 text-white px-2 py-1 rounded">
+                🧬 EVOLVING
+              </span>
             </a>
           </div>
 
@@ -18,15 +18,22 @@ export default function Navbar() {
               className="font-mono text-sm text-gray-900 hover:text-blue-600 transition-colors"
               href="/"
             >
-              LIVE
+              🌐 CROSS-CHAIN
+            </a>
+            <span className="text-gray-900">|</span>
+            <a
+              className="font-mono text-sm text-gray-900 hover:text-purple-600 transition-colors"
+              href="/"
+            >
+              🧠 AI AGENT
             </a>
             <span className="text-gray-900">|</span>
             <span
               className="font-mono text-sm text-gray-400 cursor-not-allowed relative group"
             >
-              LEADERBOARD
+              🚀 STRATEGIES
               <span className="absolute left-1/2 -translate-x-1/2 top-full mb-2 hidden group-hover:block px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap">
-                Coming soon
+                Evolving automatically
               </span>
             </span>
             <span className="text-gray-900">|</span>

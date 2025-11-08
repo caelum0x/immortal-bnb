@@ -1,153 +1,153 @@
 import { useMemo } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ResponsiveContainer, ReferenceLine } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, ReferenceLine } from "recharts";
 
-// Map model names to specific colors
-const getModelColor = (modelName: string) => {
-  const lowerName = modelName.toLowerCase();
-
-  if (lowerName.includes('claude')) {
-    return '#ff6b35';  // claude - orange
-  } else if (lowerName.includes('deepseek')) {
-    return '#4d6bfe';  // deepseek - blue
-  } else if (lowerName.includes('qwen')) {
-    return '#8b5cf6';  // qwen - purple
-  }
-
-  // Fallback for unknown models
-  return '#6b7280';  // gray
+type PerformanceData = {
+  totalPL: number;
+  winRate: number;
+  totalTrades: number;
+  profitableTrades: number;
+  losingTrades: number;
 };
 
-type Props = { data: any[] };
+type Trade = {
+  timestamp: number;
+  outcome: 'profit' | 'loss' | 'pending';
+  profitLoss?: number;
+  amount: number;
+};
 
-export default function PerformanceChart({ data }: Props) {
-  const { chartData, seriesNames } = useMemo(() => {
-    if (!Array.isArray(data) || data.length === 0) {
-      return { chartData: [], seriesNames: [] as string[] };
+type Props = {
+  data: PerformanceData;
+  trades?: Trade[];
+};
+
+export default function PerformanceChart({ data, trades = [] }: Props) {
+  const chartData = useMemo(() => {
+    if (!trades || trades.length === 0) {
+      return [{ time: Date.now(), value: 0, label: 'Start' }];
     }
 
-    const points = data
-      .map((item: any) => ({
-        t: new Date(item.createdAt).getTime(),
-        name: item.model?.name ?? item.modelId ?? "unknown",
-        v: Number(item.netPortfolio),
-      }))
-      .filter((p) => Number.isFinite(p.v))
-      .sort((a, b) => a.t - b.t);
+    let cumulative = 0;
+    return trades
+      .filter(t => t.outcome !== 'pending' && t.profitLoss !== undefined)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(trade => {
+        cumulative += trade.profitLoss || 0;
+        return {
+          time: trade.timestamp,
+          value: cumulative,
+          label: new Date(trade.timestamp).toLocaleDateString()
+        };
+      });
+  }, [trades]);
 
-    const names = new Set<string>();
-    for (const p of points) names.add(p.name);
-
-    const uniqueTs = Array.from(new Set(points.map((p) => p.t))).sort((a, b) => a - b);
-    const gaps: number[] = [];
-    for (let i = 1; i < uniqueTs.length; i++) gaps.push(uniqueTs[i] - uniqueTs[i - 1]);
-    const medianGap = gaps.length ? gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 60_000;
-    const tolerance = Math.min(5 * 60_000, Math.max(5_000, Math.floor((medianGap || 60_000) * 1.5)));
-
-    const rows: any[] = [];
-    let bucketStart = points[0].t;
-    let bucketEnd = points[0].t;
-    let bucketRows: Record<string, number> = {};
-
-    const flush = () => {
-      const center = Math.round((bucketStart + bucketEnd) / 2);
-      rows.push({ t: center, ...bucketRows });
-      bucketRows = {};
-    };
-
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      if (p.t - bucketEnd > tolerance) {
-        flush();
-        bucketStart = p.t;
-        bucketEnd = p.t;
-      }
-      bucketEnd = Math.max(bucketEnd, p.t);
-      bucketRows[p.name] = p.v;
-    }
-    flush();
-
-    return { chartData: rows, seriesNames: Array.from(names.values()) };
-  }, [data]);
+  const maxValue = Math.max(...chartData.map(d => d.value), 10);
+  const minValue = Math.min(...chartData.map(d => d.value), -10);
 
   return (
-    <div className="relative w-full flex flex-1 border-r-2 border-black">
-      {/* Title */}
-      <div className="absolute left-1/2 top-2 -translate-x-1/2 z-10">
-        <h2 className="text-sm font-bold text-black font-mono">TOTAL ACCOUNT VALUE</h2>
+    <div className="relative w-full flex flex-1 border-r-2 border-black bg-white">
+      <div className="absolute left-1/2 top-4 -translate-x-1/2 z-10">
+        <h2 className="text-sm font-bold text-black font-mono tracking-wide">
+          TOTAL PROFIT/LOSS
+        </h2>
       </div>
 
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart
-          data={chartData}
-          margin={{ top: 40, right: 80, bottom: 0, left: 20 }}
-        >
-          <CartesianGrid
-            strokeDasharray="1,3"
-            stroke="rgba(0, 0, 0, 0.1)"
-            strokeWidth={0.5}
-          />
+      <div className="absolute top-14 left-4 z-10 bg-white/90 backdrop-blur-sm border-2 border-black p-3 rounded shadow-lg">
+        <div className="space-y-1 text-xs font-mono">
+          <div className="flex justify-between gap-4">
+            <span className="text-gray-600">Total P/L:</span>
+            <span className={`font-bold ${data.totalPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {data.totalPL >= 0 ? '+' : ''}{data.totalPL.toFixed(2)}%
+            </span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-gray-600">Win Rate:</span>
+            <span className="font-bold text-blue-600">{data.winRate.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-gray-600">Trades:</span>
+            <span className="font-bold">{data.totalTrades}</span>
+          </div>
+          <div className="flex justify-between gap-4 text-[10px] text-gray-500">
+            <span>Wins: {data.profitableTrades}</span>
+            <span>Losses: {data.losingTrades}</span>
+          </div>
+        </div>
+      </div>
 
-          <XAxis
-            dataKey="t"
-            type="number"
-            domain={["auto", "auto"]}
-            tickFormatter={(v: number) => {
-              const date = new Date(v);
-              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-            }}
-            tick={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, fill: 'rgba(0, 0, 0, 0.8)' }}
-            stroke="rgba(0, 0, 0, 0.4)"
-            strokeWidth={1.5}
-          />
+      {chartData.length === 1 ? (
+        <div className="flex items-center justify-center w-full h-full">
+          <div className="text-center">
+            <p className="text-gray-400 font-mono text-sm mb-2">No trades yet</p>
+            <p className="text-gray-300 font-mono text-xs">Chart will appear after first completed trade</p>
+          </div>
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart
+            data={chartData}
+            margin={{ top: 60, right: 40, bottom: 40, left: 40 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.1)" strokeWidth={1} />
 
-          <YAxis
-            tick={{ fontSize: 12, fontFamily: 'Courier New, monospace', fontWeight: 600, fill: 'rgba(0, 0, 0, 0.8)' }}
-            tickFormatter={(v: number) => `$${v.toLocaleString()}`}
-            ticks={[500, 1000, 1500]}
-            stroke="rgba(0, 0, 0, 0.4)"
-            strokeWidth={1.5}
-          />
-
-          <Tooltip
-            labelFormatter={(label: any) => new Date(label).toLocaleString()}
-            contentStyle={{
-              backgroundColor: 'white',
-              border: '2px solid black',
-              fontFamily: 'monospace',
-              fontSize: '12px'
-            }}
-          />
-
-          <Legend
-            wrapperStyle={{
-              fontFamily: 'monospace',
-              fontSize: '12px'
-            }}
-          />
-
-          <ReferenceLine
-            y={1000}
-            stroke="rgba(0, 0, 0, 0.3)"
-            strokeWidth={2}
-            strokeDasharray="5 5"
-          />
-
-          {seriesNames.map((name) => (
-            <Line
-              key={name}
-              type="monotone"
-              dataKey={name}
-              dot={false}
+            <XAxis
+              dataKey="time"
+              type="number"
+              domain={["auto", "auto"]}
+              tickFormatter={(v: number) => {
+                const date = new Date(v);
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
+              }}
+              tick={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, fill: 'rgba(0, 0, 0, 0.7)' }}
+              stroke="rgba(0, 0, 0, 0.3)"
               strokeWidth={2}
-              stroke={getModelColor(name)}
+            />
+
+            <YAxis
+              tick={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, fill: 'rgba(0, 0, 0, 0.7)' }}
+              tickFormatter={(v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`}
+              domain={[minValue * 1.2, maxValue * 1.2]}
+              stroke="rgba(0, 0, 0, 0.3)"
+              strokeWidth={2}
+            />
+
+            <Tooltip
+              labelFormatter={(label: any) => new Date(label).toLocaleString()}
+              formatter={(value: any) => [`${value >= 0 ? '+' : ''}${value.toFixed(2)}%`, 'P/L']}
+              contentStyle={{
+                backgroundColor: 'white',
+                border: '2px solid black',
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                padding: '8px 12px'
+              }}
+            />
+
+            <ReferenceLine
+              y={0}
+              stroke="rgba(0, 0, 0, 0.4)"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              label={{ value: 'Break Even', position: 'right', style: { fontSize: 10, fill: 'rgba(0,0,0,0.5)', fontFamily: 'monospace' }}}
+            />
+
+            <Line
+              type="monotone"
+              dataKey="value"
+              dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#1e40af' }}
+              activeDot={{ r: 6 }}
+              strokeWidth={3}
+              stroke="#3b82f6"
               strokeLinecap="round"
               strokeLinejoin="round"
-              isAnimationActive={false}
+              isAnimationActive={true}
+              animationDuration={800}
               connectNulls
             />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
+          </LineChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }

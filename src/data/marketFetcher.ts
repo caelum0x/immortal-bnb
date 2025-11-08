@@ -168,52 +168,101 @@ export async function getMultipleTokensData(
 }
 
 /**
- * Get trending tokens on BNB Chain
+ * Get trending/boosted tokens on BNB Chain
+ * Uses DexScreener's token boosts API to find popular tokens
  */
 export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]> {
-  const url = `${CONFIG.DEXSCREENER_API_URL}/tokens/bnb/trending`;
+  const boostedUrl = 'https://api.dexscreener.com/token-boosts/top/v1';
 
   try {
-    const response = await fetch(url);
+    logger.info('Fetching trending tokens from DexScreener boosts...');
+
+    const response = await fetch(boostedUrl);
 
     if (!response.ok) {
-      throw new APIError(
-        `DexScreener trending API error: ${response.statusText}`,
-        response.status,
-        url
-      );
+      throw new Error(`Failed to fetch boosted tokens: ${response.statusText}`);
     }
 
-    const data = (await response.json()) as DexScreenerResponse;
+    const data = await response.json();
 
-    const trending: TokenData[] = data.pairs
-      .slice(0, limit)
-      .map(pair => ({
-        address: pair.baseToken.address,
-        symbol: pair.baseToken.symbol,
-        name: pair.baseToken.name,
-        price: parseFloat(pair.priceNative),
-        priceChange24h: pair.priceChange?.h24 || 0,
-        volume24h: pair.volume?.h24 || 0,
-        liquidity: pair.liquidity?.usd || 0,
-        marketCap: pair.marketCap || 0,
-        fdv: pair.fdv || 0,
-        priceUsd: pair.priceUsd,
-        txns24h: {
-          buys: pair.txns?.h24?.buys || 0,
-          sells: pair.txns?.h24?.sells || 0,
-        },
-        pairAddress: pair.pairAddress,
-        dexId: pair.dexId,
-      }));
+    // The API might return a single object or an array
+    const boosts = Array.isArray(data) ? data : [data];
 
-    logger.info(`Fetched ${trending.length} trending tokens`);
+    // Filter for BNB chain tokens and get their addresses
+    const bnbTokens = boosts
+      .filter((boost: any) => boost.chainId === 'bsc' && boost.tokenAddress)
+      .map((boost: any) => boost.tokenAddress)
+      .slice(0, limit);
 
-    return trending;
+    if (bnbTokens.length === 0) {
+      logger.warn('No BNB tokens found in boosts, using fallback list');
+      return getTrendingTokensFallback(limit);
+    }
+
+    logger.info(`Found ${bnbTokens.length} boosted BNB tokens`);
+
+    // Fetch detailed data for each token
+    const results: TokenData[] = [];
+
+    for (const tokenAddress of bnbTokens) {
+      try {
+        const tokenData = await getTokenData(tokenAddress);
+        if (tokenData) {
+          results.push(tokenData);
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (error) {
+        logger.warn(`Could not fetch data for ${tokenAddress}`);
+      }
+    }
+
+    logger.info(`Fetched ${results.length} trending tokens`);
+    return results;
+
   } catch (error) {
     logError('getTrendingTokens', error as Error);
-    return [];
+    logger.info('Falling back to curated token list');
+    return getTrendingTokensFallback(limit);
   }
+}
+
+/**
+ * Fallback: Get popular BNB Chain tokens (used when API fails)
+ */
+async function getTrendingTokensFallback(limit: number = 10): Promise<TokenData[]> {
+  // Popular BNB Chain tokens as fallback
+  const popularTokens = [
+    '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // ETH
+    '0x55d398326f99059fF775485246999027B3197955', // USDT
+    '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', // USDC
+    '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', // BTCB
+    '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', // BUSD
+    '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE', // XRP
+    '0xbA2aE424d960c26247Dd6c32edC70B295c744C43', // DOGE
+    '0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47', // ADA
+  ];
+
+  logger.info('Fetching data for popular BNB Chain tokens...');
+
+  const results: TokenData[] = [];
+
+  for (const tokenAddress of popularTokens.slice(0, limit)) {
+    try {
+      const tokenData = await getTokenData(tokenAddress);
+      if (tokenData) {
+        results.push(tokenData);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      logger.warn(`Could not fetch data for ${tokenAddress}`);
+    }
+  }
+
+  logger.info(`Fetched ${results.length} popular tokens`);
+  return results;
 }
 
 /**
@@ -247,6 +296,180 @@ function chunkArray<T>(array: T[], size: number): T[][] {
   }
   return chunks;
 }
+
+/**
+ * Enhanced MarketDataFetcher class with improved error handling and caching
+ */
+export class MarketDataFetcher {
+  private cache = new Map<string, { data: TokenData; timestamp: number }>();
+  private readonly CACHE_DURATION = 60 * 1000; // 1 minute cache
+
+  /**
+   * Get token data with caching
+   */
+  async getTokenData(tokenAddress: string, useCache = true): Promise<TokenData | null> {
+    // Check cache first
+    if (useCache) {
+      const cached = this.cache.get(tokenAddress);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+        logger.debug(`📦 Using cached data for ${tokenAddress}`);
+        return cached.data;
+      }
+    }
+
+    try {
+      logger.info(`🔍 Fetching token data for ${tokenAddress}`);
+      
+      const data = await getTokenData(tokenAddress);
+      
+      if (data && useCache) {
+        this.cache.set(tokenAddress, { data, timestamp: Date.now() });
+      }
+      
+      return data;
+      
+    } catch (error) {
+      logger.error(`❌ Failed to fetch token data: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get multiple tokens data in parallel
+   */
+  async getMultipleTokensData(tokenAddresses: string[]): Promise<TokenData[]> {
+    logger.info(`📊 Fetching data for ${tokenAddresses.length} tokens`);
+    
+    const promises = tokenAddresses.map(address => this.getTokenData(address));
+    const results = await Promise.allSettled(promises);
+    
+    const validData = results
+      .filter((result): result is PromiseFulfilledResult<TokenData> => 
+        result.status === 'fulfilled' && result.value !== null
+      )
+      .map(result => result.value);
+      
+    logger.info(`✅ Successfully fetched ${validData.length}/${tokenAddresses.length} tokens`);
+    return validData;
+  }
+
+  /**
+   * Get trending tokens from DexScreener
+   */
+  async getTrendingTokens(limit = 10, minLiquidity = 50000): Promise<TokenData[]> {
+    try {
+      logger.info('📈 Fetching trending tokens...');
+      
+      const trending = await getTrendingTokens(limit);
+      
+      // Filter by minimum liquidity
+      const filtered = trending.filter(token => token.liquidity >= minLiquidity);
+      
+      logger.info(`🎯 Found ${filtered.length} trending tokens with sufficient liquidity`);
+      return filtered;
+      
+    } catch (error) {
+      logger.error(`❌ Failed to fetch trending tokens: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get price history for technical analysis
+   */
+  async getPriceHistory(tokenAddress: string, timeframe: '5m' | '1h' | '4h' | '1d' = '1h'): Promise<number[]> {
+    // TODO: Implement price history fetching from DexScreener or other sources
+    // For now, return mock data
+    logger.info(`📊 Fetching price history for ${tokenAddress} (${timeframe})`);
+    
+    return []; // Mock empty array
+  }
+
+  /**
+   * Calculate buy/sell pressure from transaction data
+   */
+  calculateBuySellPressure(txns24h: { buys: number; sells: number }): number {
+    if (txns24h.buys + txns24h.sells === 0) return 0;
+    
+    const buyPressure = txns24h.buys / (txns24h.buys + txns24h.sells);
+    return (buyPressure - 0.5) * 2; // Scale to -1 to 1
+  }
+
+  /**
+   * Validate token data quality
+   */
+  validateTokenData(data: TokenData): boolean {
+    const required = ['address', 'symbol', 'price', 'volume24h', 'liquidity'];
+    
+    for (const field of required) {
+      if (!(field in data) || data[field as keyof TokenData] === null || data[field as keyof TokenData] === undefined) {
+        logger.warn(`❌ Token data missing required field: ${field}`);
+        return false;
+      }
+    }
+
+    // Check for reasonable values
+    if (data.price <= 0) {
+      logger.warn(`❌ Invalid token price: ${data.price}`);
+      return false;
+    }
+
+    if (data.volume24h < 0 || data.liquidity < 0) {
+      logger.warn(`❌ Invalid volume or liquidity values`);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Clear cache
+   */
+  clearCache(): void {
+    this.cache.clear();
+    logger.info('🗑️ Market data cache cleared');
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getCacheStats(): { size: number; hitRate: number } {
+    return {
+      size: this.cache.size,
+      hitRate: 0 // TODO: Implement hit rate tracking
+    };
+  }
+
+  /**
+   * Check if token is suitable for trading based on criteria
+   */
+  isTradeable(data: TokenData, minLiquidity = 50000, minVolume = 10000): boolean {
+    if (!this.validateTokenData(data)) {
+      return false;
+    }
+
+    if (data.liquidity < minLiquidity) {
+      logger.debug(`❌ Token ${data.symbol} liquidity too low: $${data.liquidity.toLocaleString()}`);
+      return false;
+    }
+
+    if (data.volume24h < minVolume) {
+      logger.debug(`❌ Token ${data.symbol} volume too low: $${data.volume24h.toLocaleString()}`);
+      return false;
+    }
+
+    // Check for extreme price changes (possible rug pull indicators)
+    if (Math.abs(data.priceChange24h) > 90) {
+      logger.debug(`❌ Token ${data.symbol} extreme price change: ${data.priceChange24h.toFixed(2)}%`);
+      return false;
+    }
+
+    return true;
+  }
+}
+
+// Export singleton instance
+export const marketDataFetcher = new MarketDataFetcher();
 
 export default {
   getTokenData,

@@ -1,281 +1,243 @@
-import fetch from 'node-fetch';
-import { logger, logAIDecision, logError } from '../utils/logger';
-import { withRetry, safeJsonParse, APIError } from '../utils/errorHandler';
+import { createOpenAI } from '@ai-sdk/openai';
+import { generateText } from 'ai';
+import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
-import { TokenData, calculateBuySellPressure } from '../data/marketFetcher';
+import type { TokenInfo, MarketData } from '../types';
+import { queryMemories } from '../blockchain/memoryStorage';
 
-export interface AIDecision {
-  action: 'buy' | 'sell' | 'hold';
-  amount: number; // in BNB
+// Initialize OpenAI with OpenRouter
+const openai = createOpenAI({
+  apiKey: CONFIG.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+export interface AIDecisionParams {
+  tokenSymbol: string;
+  tokenAddress: string;
+  priceUsd: string;
+  volume24h: number;
+  priceChange24h: number;
+  liquidity: number;
+  walletBalance: number;
+  marketSentiment?: string;
+  previousTrades?: any[];
+}
+
+export interface AIDecisionResult {
+  action: 'BUY' | 'SELL' | 'HOLD';
+  amount: number; // Percentage of wallet balance (0-1)
   confidence: number; // 0-1
-  reason: string;
-  riskLevel: 'low' | 'medium' | 'high';
-  targetPrice?: number;
+  reasoning: string;
+  strategy: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   stopLoss?: number;
+  takeProfit?: number;
 }
 
-export interface DecisionContext {
-  tokenData: TokenData;
-  memories: string[];
-  accountBalance: number;
-  currentPositions: Map<string, number>; // token address -> amount
-}
+export class AIDecisionEngine {
+  async makeDecision(params: AIDecisionParams): Promise<AIDecisionResult> {
+    try {
+      logger.info(`🧠 AI analyzing ${params.tokenSymbol} (${params.tokenAddress})`);
 
-/**
- * Get AI trading decision using OpenRouter
- */
-export async function getAIDecision(
-  context: DecisionContext
-): Promise<AIDecision> {
-  const { tokenData, memories, accountBalance, currentPositions } = context;
+      // Get relevant memories
+      const relevantMemories = await queryMemories({
+        tokenAddress: params.tokenAddress,
+        limit: 5
+      });
 
-  // Build context-rich prompt
-  const prompt = buildPrompt(tokenData, memories, accountBalance, currentPositions);
+      // Build context for AI
+      const marketContext = this.buildMarketContext(params, relevantMemories);
+      
+      // Generate AI decision
+      const aiResponse = await this.generateAIDecision(marketContext, params);
+      
+      // Parse and validate response
+      const decision = this.parseAIResponse(aiResponse, params);
+      
+      logger.info(`🎯 AI Decision: ${decision.action} ${(decision.amount * 100).toFixed(1)}% (${(decision.confidence * 100).toFixed(1)}%)`);
+      
+      return decision;
 
-  try {
-    const decision = await withRetry(
-      async () => {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/arhansubasi0/immortal-bnb',
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-4o-mini', // Fast and cheap
-            messages: [
-              {
-                role: 'system',
-                content: 'You are an expert crypto trading AI specialized in BNB Chain DeFi. Analyze data and provide strategic trading decisions in JSON format.',
-              },
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-            temperature: 0.7,
-            max_tokens: 500,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new APIError(
-            `OpenRouter API error: ${response.statusText}`,
-            response.status,
-            'https://openrouter.ai/api/v1/chat/completions'
-          );
-        }
-
-        return response;
-      },
-      3,
-      2000,
-      'OpenRouter AI decision'
-    );
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
-      throw new Error('Empty response from AI');
+    } catch (error) {
+      logger.error(`AI Decision error: ${(error as Error).message}`);
+      
+      // Return safe default
+      return {
+        action: 'HOLD',
+        amount: 0,
+        confidence: 0,
+        reasoning: 'Error in AI analysis - defaulting to HOLD for safety',
+        strategy: 'SAFE_MODE',
+        riskLevel: 'LOW'
+      };
     }
+  }
 
-    // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const jsonStr = jsonMatch ? jsonMatch[0] : content;
+  private buildMarketContext(params: AIDecisionParams, memories: any[]): string {
+    const memoryContext = memories.length > 0 
+      ? `Previous trades with ${params.tokenSymbol}:\n${memories.map(m => 
+          `- ${m.action} at $${m.entryPrice} (${m.outcome || 'pending'})`
+        ).join('\n')}\n\n`
+      : '';
 
-    const aiDecision: AIDecision = safeJsonParse(jsonStr, {
-      action: 'hold',
-      amount: 0,
-      confidence: 0,
-      reason: 'Failed to parse AI response',
-      riskLevel: 'low',
+    return `
+MARKET ANALYSIS REQUEST for ${params.tokenSymbol} (${params.tokenAddress})
+
+Current Market Data:
+- Price: $${params.priceUsd}
+- 24h Volume: $${params.volume24h.toLocaleString()}
+- 24h Change: ${params.priceChange24h.toFixed(2)}%
+- Liquidity: $${params.liquidity.toLocaleString()}
+- Wallet Balance: ${params.walletBalance.toFixed(4)} BNB
+
+${memoryContext}Market Sentiment: ${params.marketSentiment || 'Unknown'}
+
+You are an expert DeFi trading AI with access to immortal memory. Analyze this token and provide a trading decision.
+
+Consider:
+1. Technical indicators from price/volume data
+2. Market conditions and sentiment
+3. Risk management (never risk more than 10% on single trade)
+4. Previous trading history with this token
+5. Liquidity risks and slippage
+6. Current portfolio exposure
+
+CRITICAL: Only recommend BUY if you're highly confident (>70%) and see clear upside potential.
+Always include stop-loss and take-profit levels for trades.
+`.trim();
+  }
+
+  private async generateAIDecision(context: string, params: AIDecisionParams): Promise<string> {
+    const model = openai('openai/gpt-4o-mini');
+    
+    const { text } = await generateText({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert DeFi trading AI with immortal memory. You make precise, data-driven trading decisions.
+
+RESPONSE FORMAT (JSON):
+{
+  "action": "BUY|SELL|HOLD",
+  "amount": 0.05,
+  "confidence": 0.85,
+  "reasoning": "Clear explanation of decision",
+  "strategy": "MOMENTUM|MEAN_REVERSION|BREAKOUT|ARBITRAGE|DCA",
+  "riskLevel": "LOW|MEDIUM|HIGH",
+  "stopLoss": 0.95,
+  "takeProfit": 1.20
+}
+
+RULES:
+- Amount is percentage of wallet (0-1, max 0.1 for single trade)
+- Confidence must be >0.7 for BUY/SELL recommendations
+- Always include reasoning and strategy
+- Set realistic stop-loss (5-15% below entry) and take-profit (15-50% above)
+- Consider gas fees and slippage in calculations
+- NEVER recommend more than 10% of wallet on single trade`
+        },
+        {
+          role: 'user',
+          content: context
+        }
+      ],
+      temperature: 0.3
     });
 
-    // Validate and sanitize decision
-    const validatedDecision = validateDecision(aiDecision, accountBalance);
+    return text;
+  }
 
-    logAIDecision(validatedDecision, tokenData.symbol);
+  private parseAIResponse(response: string, params: AIDecisionParams): AIDecisionResult {
+    try {
+      // Extract JSON from response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in AI response');
+      }
 
-    return validatedDecision;
-  } catch (error) {
-    logError('getAIDecision', error as Error);
+      const parsed = JSON.parse(jsonMatch[0]);
+      
+      // Validate and sanitize
+      const action = ['BUY', 'SELL', 'HOLD'].includes(parsed.action) ? parsed.action : 'HOLD';
+      const amount = Math.max(0, Math.min(0.1, parseFloat(parsed.amount) || 0)); // Cap at 10%
+      const confidence = Math.max(0, Math.min(1, parseFloat(parsed.confidence) || 0));
+      
+      // Safety checks
+      if (amount > 0.1) {
+        logger.warn(`AI recommended ${(amount * 100).toFixed(1)}% - capping at 10%`);
+      }
 
-    // Return safe default on error
-    return {
-      action: 'hold',
-      amount: 0,
-      confidence: 0,
-      reason: `AI decision failed: ${(error as Error).message}`,
-      riskLevel: 'low',
-    };
+      if (confidence < 0.7 && action !== 'HOLD') {
+        logger.warn(`AI confidence ${(confidence * 100).toFixed(1)}% too low - switching to HOLD`);
+        return {
+          action: 'HOLD',
+          amount: 0,
+          confidence: confidence,
+          reasoning: `Original: ${parsed.reasoning}. Confidence too low for execution.`,
+          strategy: parsed.strategy || 'SAFE_MODE',
+          riskLevel: 'LOW'
+        };
+      }
+
+      return {
+        action,
+        amount,
+        confidence,
+        reasoning: parsed.reasoning || 'AI provided decision without reasoning',
+        strategy: parsed.strategy || 'UNKNOWN',
+        riskLevel: parsed.riskLevel || 'MEDIUM',
+        stopLoss: parsed.stopLoss,
+        takeProfit: parsed.takeProfit
+      };
+
+    } catch (error) {
+      logger.error(`Error parsing AI response: ${(error as Error).message}`);
+      logger.debug(`Raw AI response: ${response}`);
+      
+      return {
+        action: 'HOLD',
+        amount: 0,
+        confidence: 0,
+        reasoning: 'Failed to parse AI response - defaulting to HOLD',
+        strategy: 'ERROR_FALLBACK',
+        riskLevel: 'LOW'
+      };
+    }
+  }
+
+  async getMarketSentiment(tokenSymbol: string): Promise<string> {
+    try {
+      // Simple sentiment analysis based on recent memories
+      const recentMemories = await queryMemories({
+        limit: 10
+      });
+
+      if (recentMemories.length === 0) {
+        return 'NEUTRAL - No trading history';
+      }
+
+      const recentOutcomes = recentMemories
+        .filter((m: any) => m.outcome && m.outcome !== 'pending')
+        .map((m: any) => m.outcome);
+
+      if (recentOutcomes.length === 0) {
+        return 'NEUTRAL - No completed trades';
+      }
+
+      const profitable = recentOutcomes.filter((o: any) => o === 'profit').length;
+      const total = recentOutcomes.length;
+      const successRate = profitable / total;
+
+      if (successRate > 0.7) return 'BULLISH - High success rate';
+      if (successRate < 0.3) return 'BEARISH - Low success rate';
+      return 'NEUTRAL - Mixed results';
+
+    } catch (error) {
+      logger.error(`Error getting market sentiment: ${(error as Error).message}`);
+      return 'UNKNOWN';
+    }
   }
 }
 
-/**
- * Build comprehensive prompt for AI
- */
-function buildPrompt(
-  tokenData: TokenData,
-  memories: string[],
-  accountBalance: number,
-  currentPositions: Map<string, number>
-): string {
-  const buySellPressure = calculateBuySellPressure(tokenData);
-  const hasPosition = currentPositions.has(tokenData.address);
-  const positionSize = currentPositions.get(tokenData.address) || 0;
-
-  const memoriesStr = memories.length > 0
-    ? `\n\n**Past Trading Memories (Learn from these):**\n${memories.join('\n')}`
-    : '\n\n**No past memories yet - this is your first analysis.**';
-
-  return `
-# Trading Analysis Request
-
-## Token Information
-- **Symbol**: ${tokenData.symbol}
-- **Name**: ${tokenData.name}
-- **Address**: ${tokenData.address}
-- **Current Price**: $${tokenData.priceUsd} (${tokenData.price} BNB)
-- **24h Change**: ${tokenData.priceChange24h.toFixed(2)}%
-- **24h Volume**: $${tokenData.volume24h.toLocaleString()}
-- **Liquidity**: $${tokenData.liquidity.toLocaleString()}
-- **Market Cap**: $${tokenData.marketCap.toLocaleString()}
-- **FDV**: $${tokenData.fdv.toLocaleString()}
-
-## Trading Activity (24h)
-- **Buys**: ${tokenData.txns24h.buys}
-- **Sells**: ${tokenData.txns24h.sells}
-- **Buy/Sell Pressure**: ${buySellPressure.toFixed(3)} (${buySellPressure > 0 ? 'Bullish' : 'Bearish'})
-
-## Account Status
-- **Available Balance**: ${accountBalance.toFixed(4)} BNB
-- **Current Position**: ${hasPosition ? `${positionSize.toFixed(4)} BNB` : 'None'}
-- **Max Trade Amount**: ${CONFIG.MAX_TRADE_AMOUNT_BNB} BNB
-${memoriesStr}
-
-## Task
-Analyze this token and decide: **buy**, **sell** (if we have a position), or **hold**.
-
-## Decision Criteria
-1. **Liquidity**: Minimum $10,000 for safe trading
-2. **Volume**: High volume = high interest
-3. **Buy/Sell Pressure**: Positive = accumulation, Negative = distribution
-4. **Price Trend**: 24h change and momentum
-5. **Risk Management**: Never exceed max trade amount, use stop losses
-6. **Memory Learning**: Learn from past successful/failed trades
-
-## Output Format (JSON only)
-\`\`\`json
-{
-  "action": "buy" | "sell" | "hold",
-  "amount": 0.05,
-  "confidence": 0.75,
-  "reason": "Strong buy pressure (+0.45), high volume ($500K), liquidity sufficient. Similar pattern to successful memory #3.",
-  "riskLevel": "low" | "medium" | "high",
-  "targetPrice": 0.000123,
-  "stopLoss": 0.000098
-}
-\`\`\`
-
-**Important**:
-- If liquidity < $10K, always return "hold"
-- Amount must be between 0 and ${CONFIG.MAX_TRADE_AMOUNT_BNB} BNB
-- Only "sell" if we have an existing position
-- Be conservative - preservation of capital is key
-`;
-}
-
-/**
- * Validate and sanitize AI decision
- */
-function validateDecision(
-  decision: AIDecision,
-  accountBalance: number
-): AIDecision {
-  // Ensure action is valid
-  if (!['buy', 'sell', 'hold'].includes(decision.action)) {
-    logger.warn(`Invalid action '${decision.action}', defaulting to hold`);
-    decision.action = 'hold';
-  }
-
-  // Ensure amount is within limits
-  if (decision.amount < 0) {
-    decision.amount = 0;
-  }
-
-  if (decision.amount > CONFIG.MAX_TRADE_AMOUNT_BNB) {
-    logger.warn(`AI suggested ${decision.amount} BNB, capping at ${CONFIG.MAX_TRADE_AMOUNT_BNB}`);
-    decision.amount = CONFIG.MAX_TRADE_AMOUNT_BNB;
-  }
-
-  // Don't trade if insufficient balance
-  if (decision.action === 'buy' && decision.amount > accountBalance * 0.95) {
-    logger.warn('Insufficient balance for trade, changing to hold');
-    decision.action = 'hold';
-    decision.amount = 0;
-  }
-
-  // Ensure confidence is 0-1
-  decision.confidence = Math.max(0, Math.min(1, decision.confidence));
-
-  // Default values
-  if (!decision.riskLevel) {
-    decision.riskLevel = 'medium';
-  }
-
-  if (!decision.reason) {
-    decision.reason = 'No reason provided';
-  }
-
-  return decision;
-}
-
-/**
- * Simple rule-based decision (fallback if AI fails)
- */
-export function getRuleBasedDecision(
-  tokenData: TokenData,
-  accountBalance: number
-): AIDecision {
-  const buySellPressure = calculateBuySellPressure(tokenData);
-  const hasLiquidity = tokenData.liquidity >= 10000;
-  const hasVolume = tokenData.volume24h >= 50000;
-  const priceUp = tokenData.priceChange24h > 5;
-
-  // Conservative rules
-  if (!hasLiquidity) {
-    return {
-      action: 'hold',
-      amount: 0,
-      confidence: 0,
-      reason: 'Insufficient liquidity (< $10K)',
-      riskLevel: 'high',
-    };
-  }
-
-  if (buySellPressure > 0.3 && hasVolume && priceUp) {
-    return {
-      action: 'buy',
-      amount: Math.min(0.05, CONFIG.MAX_TRADE_AMOUNT_BNB),
-      confidence: 0.6,
-      reason: 'Strong buy pressure, good volume, price trending up',
-      riskLevel: 'medium',
-      stopLoss: parseFloat(tokenData.priceUsd) * 0.95,
-    };
-  }
-
-  return {
-    action: 'hold',
-    amount: 0,
-    confidence: 0.5,
-    reason: 'Conditions not met for entry',
-    riskLevel: 'low',
-  };
-}
-
-export default {
-  getAIDecision,
-  getRuleBasedDecision,
-};
+export const aiDecisionEngine = new AIDecisionEngine();
