@@ -1,9 +1,5 @@
 {
-  "name": "immortal-ai-trading-bot",
-  "version": "1.0.0",
-  "description": "Immortal AI Trading Bot for BNB Chain - Autonomous trading with decentralized memory",
-  "main": "index.ts",
-  "type": "module",
+  
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
@@ -37,13 +33,4 @@
     "express": "^4.19.2",
     "cors": "^2.8.5"
   },
-  "devDependencies": {
-    "@types/node": "^22.7.7",
-    "typescript": "^5.6.3",
-    "bun-types": "latest"
-  },
-  "engines": {
-    "node": ">=18.0.0",
-    "bun": ">=1.0.0"
-  }
-}
+ 
