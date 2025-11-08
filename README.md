@@ -248,18 +248,31 @@ The bot learns by:
 
 ### Deploy Contracts
 
-1. Open **Remix IDE**: https://remix.ethereum.org
-2. Copy `contracts/IMMBotToken.sol` and `contracts/Staking.sol`
-3. Install OpenZeppelin:
-   ```
-   npm install @openzeppelin/contracts
-   ```
-4. Compile with Solidity 0.8.20+
-5. Deploy to BNB Testnet via MetaMask
-6. Update `.env` with deployed addresses:
-   ```
-   IMMBOT_TOKEN_ADDRESS=0x...
-   ```
+**Quick deployment using Hardhat scripts:**
+
+```bash
+# 1. Setup contract environment
+bash scripts/setup-contracts.sh
+
+# 2. Compile contracts
+npx hardhat compile
+
+# 3. Deploy to testnet
+npx hardhat run scripts/deploy-token.ts --network bscTestnet
+npx hardhat run scripts/deploy-staking.ts --network bscTestnet
+
+# 4. Verify on BscScan
+npx hardhat verify --network bscTestnet <TOKEN_ADDRESS> 1000000000
+npx hardhat verify --network bscTestnet <STAKING_ADDRESS> <TOKEN_ADDRESS>
+```
+
+**Update `.env` with deployed addresses:**
+```bash
+IMMBOT_TOKEN_ADDRESS=0x...
+STAKING_CONTRACT_ADDRESS=0x...
+```
+
+📖 **Detailed guide**: See [contracts/README.md](contracts/README.md) for complete deployment documentation
 
 ## 📊 Configuration
 
@@ -289,13 +302,40 @@ Or leave empty to auto-track trending tokens.
 
 ## 🧪 Testing
 
+### Automated Tests
+
 ```bash
-# Run unit tests
+# Run all tests
 bun test
+
+# Run integration tests
+bun test src/__tests__/integration/
+
+# Run smoke tests
+bun test src/__tests__/smoke/
 
 # Test specific module
 bun test src/agent/aiDecision.test.ts
 ```
+
+### Manual Testing
+
+Follow the comprehensive manual testing checklist:
+
+```bash
+# View testing guide
+cat TESTING.md
+```
+
+The testing guide covers:
+- ✅ Backend API endpoint testing
+- ✅ Frontend UI testing
+- ✅ Error handling scenarios
+- ✅ Performance metrics
+- ✅ Security verification
+- ✅ Production deployment checks
+
+📖 **Testing guide**: See [TESTING.md](TESTING.md) for complete testing procedures
 
 ## 📱 Telegram Setup
 
@@ -307,14 +347,45 @@ bun test src/agent/aiDecision.test.ts
    ```
 4. Add to `.env`
 
-## 🛡️ Safety Features
+## 🛡️ Safety & Security Features
 
+### Trading Safety
 - **Stop-Loss**: Auto-sells at configured loss threshold
 - **Position Sizing**: Limits based on account balance
 - **Cooldowns**: Prevents over-trading same token
 - **Rate Limiting**: Respects API limits
 - **Gas Estimation**: Checks costs before execution
 - **Slippage Protection**: Rejects unfavorable prices
+
+### API Security (Production)
+- **Input Validation**: All endpoints validate request parameters
+  - Token address format validation (Ethereum addresses)
+  - Risk level bounds checking (1-10)
+  - Query parameter limits enforcement
+- **Rate Limiting**: Protects against abuse and DDoS
+  - Bot control: 10 requests/minute
+  - General API: 100 requests/15 minutes
+  - Read operations: 200 requests/15 minutes
+- **CORS Protection**: Restricts frontend origins
+- **XSS Protection**: Request sanitization middleware
+- **API Key Authentication**: Optional header-based auth
+
+### Deployment Validation
+
+Run pre-deployment checks before going to production:
+
+```bash
+npx ts-node scripts/validate-deployment.ts
+```
+
+This validates:
+- ✅ All required environment variables
+- ✅ Critical dependencies installed
+- ✅ Security middleware configured
+- ✅ Network configuration
+- ✅ Deployment readiness
+
+📖 **Production guide**: See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment instructions
 
 ## 📈 Monitoring
 
