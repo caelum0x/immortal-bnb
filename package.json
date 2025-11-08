@@ -1,5 +1,8 @@
 {
-  
+  "name": "immortal-bnb",
+  "version": "1.0.0",
+  "description": "Immortal AI Trading Bot for BNB Chain with decentralized memory on Greenfield",
+  "main": "src/index.ts",
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
@@ -20,17 +23,19 @@
   "author": "arhansubasi0",
   "license": "MIT",
   "dependencies": {
-    "ethers": "^6.13.4",
-    "@pancakeswap/sdk": "^5.7.0",
     "@bnb-chain/greenfield-js-sdk": "^2.0.0",
-    "telegraf": "^4.16.3",
-    "dotenv": "^16.4.5",
-    "node-fetch": "^3.3.2",
-    "winston": "^3.14.2",
     "@openrouter/ai-sdk-provider": "^1.2.0",
+    "@pancakeswap/sdk": "^5.7.0",
     "ai": "^5.0.81",
-    "zod": "^3.23.8",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
     "express": "^4.19.2",
-    "cors": "^2.8.5"
-  },
- 
+    "express-rate-limit": "^8.2.1",
+    "express-validator": "^7.3.0",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3",
+    "winston": "^3.14.2",
+    "zod": "^3.23.8"
+  }
+}
