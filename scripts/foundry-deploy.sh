@@ -5,6 +5,9 @@
 
 set -e  # Exit on error
 
+# Add Foundry to PATH
+export PATH="$PATH:/root/.foundry/bin"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
