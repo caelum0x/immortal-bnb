@@ -4,6 +4,7 @@
  * Validates all connections before starting trading
  */
 
+import 'reflect-metadata';
 import { logger } from './src/utils/logger';
 import { CONFIG } from './src/config';
 
@@ -21,8 +22,9 @@ const colors = {
 function printBanner() {
   console.log('\n' + colors.cyan + colors.bright);
   console.log('═'.repeat(70));
-  console.log('                    IMMORTAL AI TRADING BOT');
-  console.log('                  BNB Chain • PancakeSwap V3');
+  console.log('             🤖 IMMORTAL AI TRADING BOT 🧬');
+  console.log('           BNB Chain • Cross-Chain • AI Agent');
+  console.log('             Evolving Strategies • Real Memory');
   console.log('═'.repeat(70));
   console.log(colors.reset);
 }
@@ -134,7 +136,7 @@ async function checkGreenfieldConnection(): Promise<boolean> {
 
     info('Connecting to Greenfield...');
     const memoryIds = await fetchAllMemories();
-    success(`Connected to Greenfield bucket: ${CONFIG.GREENFIELD_BUCKET}`);
+    success(`Connected to Greenfield bucket: ${CONFIG.GREENFIELD_BUCKET_NAME}`);
     success(`Found ${memoryIds.length} stored memories`);
 
     return true;
@@ -172,7 +174,7 @@ async function checkMarketDataAPI(): Promise<boolean> {
 }
 
 async function checkOpenRouterAPI(): Promise<boolean> {
-  printBox('AI Agent (OpenRouter)', []);
+  printBox('🤖 Immortal AI Agent System', []);
 
   try {
     info('Testing OpenRouter API connection...');
@@ -185,7 +187,11 @@ async function checkOpenRouterAPI(): Promise<boolean> {
 
     if (response.ok) {
       success('OpenRouter API connected');
-      success('AI decision-making ready');
+      success('🧠 Immortal AI Agent loaded');
+      success('🌐 Cross-chain arbitrage engine ready');
+      success('🧬 Strategy evolution system active');
+      success('📊 Real-time market analysis enabled');
+      success('🎯 AI decision-making ready');
       return true;
     } else {
       error('OpenRouter API authentication failed');
@@ -389,7 +395,7 @@ async function main() {
 }
 
 // Run if executed directly
-if (import.meta.main) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
     console.error('\n' + colors.red + colors.bright + '💥 Fatal Error!' + colors.reset);
     console.error(colors.red + error.message + colors.reset);

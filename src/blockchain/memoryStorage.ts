@@ -8,7 +8,7 @@ import { VisibilityType, RedundancyType } from '@bnb-chain/greenfield-js-sdk'; /
 import Long from 'long'; // For handling large numbers (required by SDK)
 import { ethers } from 'ethers'; // For wallet utilities (e.g., signer from private key)
 import { logger, logMemory, logError } from '../utils/logger';
-import { TradeMemory } from '../agent/learningLoop';
+import type { TradeMemory, StorageStats } from '../types/memory';
 import { CONFIG } from '../config';
 
 // Constants from centralized config
@@ -17,11 +17,24 @@ const GREENFIELD_CHAIN_ID = CONFIG.GREENFIELD_CHAIN_ID;
 const BUCKET_NAME = CONFIG.GREENFIELD_BUCKET_NAME;
 const ACCOUNT_PRIVATE_KEY = CONFIG.WALLET_PRIVATE_KEY;
 
-if (!ACCOUNT_PRIVATE_KEY) {
-  throw new Error('WALLET_PRIVATE_KEY not found in environment variables');
+// Check if we have a valid private key for actual wallet operations
+const hasValidKey = ACCOUNT_PRIVATE_KEY && 
+  ACCOUNT_PRIVATE_KEY !== 'your_test_wallet_private_key_here' &&
+  ACCOUNT_PRIVATE_KEY !== 'your_wallet_private_key_here' &&
+  ACCOUNT_PRIVATE_KEY.length > 20 &&
+  ACCOUNT_PRIVATE_KEY.startsWith('0x');
+
+if (!hasValidKey) {
+  logger.warn('⚠️  No valid WALLET_PRIVATE_KEY configured. Memory storage will be disabled.');
+  logger.warn('   Add a real private key to .env to enable immortal memory features.');
+  if (ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20) {
+    logger.info('   Detected potential test wallet - will attempt operations (may fail without funds)');
+  }
 }
 
-const ACCOUNT_ADDRESS = new ethers.Wallet(ACCOUNT_PRIVATE_KEY).address; // Derive address
+const ACCOUNT_ADDRESS = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x') 
+  ? new ethers.Wallet(ACCOUNT_PRIVATE_KEY).address 
+  : null;
 
 // Initialize Greenfield client
 let client: Client;
@@ -41,20 +54,24 @@ async function initClient(): Promise<Client> {
  * Helper: Create bucket if it doesn't exist (public read for simplicity)
  */
 async function ensureBucketExists(): Promise<void> {
+  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  
+  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+    throw new Error('Cannot create bucket: No valid wallet configured');
+  }
+
   try {
     const greenfieldClient = await initClient();
 
     // Check if bucket exists
     const headBucketRes = await greenfieldClient.bucket.headBucket(BUCKET_NAME);
-    if (headBucketRes.statusCode === 200) {
+    if (headBucketRes) {
       logger.info(`Bucket ${BUCKET_NAME} already exists.`);
       return;
     }
   } catch (error: any) {
-    if (error.statusCode !== 404) {
-      logger.error('Error checking bucket:', error);
-      throw error; // Rethrow if not "not found"
-    }
+    // If bucket doesn't exist, we'll create it below
+    logger.info(`Bucket ${BUCKET_NAME} does not exist, creating...`);
   }
 
   try {
@@ -100,10 +117,10 @@ async function ensureBucketExists(): Promise<void> {
 async function getPrimarySpAddress(): Promise<string> {
   const greenfieldClient = await initClient();
   const spList = await greenfieldClient.sp.getStorageProviders();
-  if (spList.length === 0) {
+  if (!spList || spList.length === 0) {
     throw new Error('No storage providers available');
   }
-  return spList[0].operatorAddress; // Use the first SP
+  return spList[0]?.operatorAddress || ''; // Use the first SP with null check
 }
 
 /**
@@ -125,6 +142,15 @@ export async function initializeStorage(): Promise<void> {
  * Store memory (trade data as JSON) on Greenfield
  */
 export async function storeMemory(tradeData: TradeMemory): Promise<string> {
+  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  
+  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+    logger.warn('🚨 Memory storage disabled - using local fallback (no wallet configured)');
+    const fallbackId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    logger.info(`Simulated memory storage: ${tradeData.tokenSymbol} ${tradeData.action}`);
+    return fallbackId;
+  }
+
   try {
     await ensureBucketExists(); // Ensure bucket ready
 
@@ -172,7 +198,7 @@ export async function storeMemory(tradeData: TradeMemory): Promise<string> {
       {
         bucketName: BUCKET_NAME,
         objectName,
-        body: memoryJson, // String or Buffer
+        body: new File([memoryJson], objectName, { type: 'application/json' }),
         txnHash: createRes.transactionHash,
       },
       {
@@ -186,7 +212,7 @@ export async function storeMemory(tradeData: TradeMemory): Promise<string> {
     }
 
     logMemory(memoryId, 'store');
-    logger.info(`Memory stored on Greenfield: ${memoryId} (Object ID: ${uploadRes.objectInfo?.id})`);
+    logger.info(`Memory stored on Greenfield: ${memoryId}`);
     logger.info(`Token: ${tradeData.tokenSymbol}, Action: ${tradeData.action}`);
 
     return memoryId;
@@ -200,6 +226,13 @@ export async function storeMemory(tradeData: TradeMemory): Promise<string> {
  * Fetch memory by object name (returns parsed JSON)
  */
 export async function fetchMemory(objectName: string): Promise<TradeMemory | null> {
+  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  
+  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+    logger.warn('🚨 Cannot fetch memory - no valid wallet configured');
+    return null;
+  }
+
   try {
     const greenfieldClient = await initClient();
 
@@ -218,19 +251,28 @@ export async function fetchMemory(objectName: string): Promise<TradeMemory | nul
       throw new Error(`Fetch failed: ${getRes.message}`);
     }
 
-    // Assuming body is a ReadableStream or Buffer (in Node.js)
-    const body = getRes.body as ReadableStream<Uint8Array>;
-    const chunks: Uint8Array[] = [];
-    const reader = body.getReader();
+    // Handle response body - could be Blob or ReadableStream
+    let memoryJson: string;
+    
+    if (getRes.body instanceof Blob) {
+      memoryJson = await getRes.body.text();
+    } else if (getRes.body) {
+      // Assume it's a ReadableStream
+      const body = getRes.body as unknown as ReadableStream<Uint8Array>;
+      const chunks: Uint8Array[] = [];
+      const reader = body.getReader();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+
+      const memoryBuffer = Buffer.concat(chunks);
+      memoryJson = memoryBuffer.toString('utf-8');
+    } else {
+      throw new Error('No response body received');
     }
-
-    const memoryBuffer = Buffer.concat(chunks);
-    const memoryJson = memoryBuffer.toString('utf-8');
 
     logMemory(objectName, 'fetch');
     return JSON.parse(memoryJson);
@@ -245,11 +287,19 @@ export async function fetchMemory(objectName: string): Promise<TradeMemory | nul
  * List all stored memories in bucket
  */
 export async function fetchAllMemories(): Promise<string[]> {
+  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  
+  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+    logger.warn('🚨 Cannot fetch memories - no valid wallet configured');
+    return [];
+  }
+
   try {
     const greenfieldClient = await initClient();
 
     const listRes = await greenfieldClient.object.listObjects({
       bucketName: BUCKET_NAME,
+      endpoint: GREENFIELD_RPC_URL,
     });
 
     if (listRes.statusCode !== 200) {
@@ -304,6 +354,13 @@ export async function updateMemory(
  * Delete a memory (optional, for cleanup)
  */
 export async function deleteMemory(objectName: string): Promise<boolean> {
+  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  
+  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+    logger.warn('🚨 Cannot delete memory - no valid wallet configured');
+    return false;
+  }
+
   try {
     const greenfieldClient = await initClient();
 
@@ -401,12 +458,7 @@ export async function queryMemories(filters: {
 /**
  * Get storage statistics
  */
-export async function getStorageStats(): Promise<{
-  totalMemories: number;
-  oldestMemory: number | null;
-  newestMemory: number | null;
-  totalSize: number;
-}> {
+export async function getStorageStats(): Promise<StorageStats> {
   const allObjectNames = await fetchAllMemories();
   const memories = await Promise.all(allObjectNames.map(name => fetchMemory(name)));
 

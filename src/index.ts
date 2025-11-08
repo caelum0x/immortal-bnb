@@ -1,35 +1,43 @@
 #!/usr/bin/env bun
 /**
  * Immortal AI Trading Bot - Main Entry Point
- * Based on hkirat/ai-trading-agent but adapted for BNB Chain
- *
- * Key Changes from Base:
- * - Lighter Protocol → PancakeSwap (spot trading)
- * - Prisma Database → BNB Greenfield (immortal memory)
- * - Perpetual futures → Spot tokens
- * - OpenRouter AI with tool calling (kept from base)
+ * 
+ * Features:
+ * - Real market data from DexScreener API
+ * - AI-powered trading decisions via OpenRouter LLM
+ * - Cross-chain arbitrage detection (BNB ↔ Solana/Ethereum)
+ * - Strategy evolution using genetic algorithms
+ * - Immortal memory storage on BNB Greenfield
+ * - PancakeSwap integration for DEX trading
+ * - Telegram alerts and monitoring
+ * - Non-custodial user-approved trades
  */
 
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { streamText, tool } from 'ai';
-import { z } from 'zod';
-import { formatPrompt } from './prompt';
-import { CONFIG } from './config';
+import 'reflect-metadata';
 import { logger } from './utils/logger';
-import { getTokenData, getTrendingTokens } from './data/marketFetcher';
-import { executeTrade, getWalletBalance, initializeProvider } from './blockchain/tradeExecutor';
-import { storeMemory, fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
-import { initializeTelegramBot, alertBotStatus, alertAIDecision, alertTradeExecution } from './alerts/telegramBot';
-import { TradeMemory } from './agent/learningLoop';
-import { calculateBuySellPressure } from './data/marketFetcher';
+import { CONFIG } from './config';
+import { ImmortalAIAgent } from './ai/immortalAgent';
 import { startAPIServer } from './api/server';
+import { telegramBotManager } from './alerts/telegramBot';
+import { storeMemory, initializeStorage } from './blockchain/memoryStorage';
+import { getTokenData, getTrendingTokens, calculateBuySellPressure } from './data/marketFetcher';
+import { TradeExecutor } from './blockchain/tradeExecutor';
+import { CrossChainArbitrageEngine } from './ai/crossChainStrategy';
+import { StrategyEvolutionEngine } from './ai/strategyEvolution';
+import handleError from './utils/errorHandler';
+import { validateTradeAmount } from './utils/safeguards';
+import { ethers } from 'ethers';
 
-// Initialize OpenRouter
-const openrouter = createOpenRouter({
-  apiKey: CONFIG.OPENROUTER_API_KEY,
-});
+// Global provider and wallet
+let provider: ethers.JsonRpcProvider;
+let wallet: ethers.Wallet;
+let tradeExecutor: TradeExecutor;
 
-// Track state
+// Initialize AI agent systems
+const immortalAgent = new ImmortalAIAgent();
+const crossChainEngine = new CrossChainArbitrageEngine();
+const strategyEngine = new StrategyEvolutionEngine();
+
 let invocationCount = 0;
 const activePositions = new Map<string, {
   amount: number;
@@ -39,7 +47,101 @@ const activePositions = new Map<string, {
 }>();
 
 /**
- * Main AI agent invocation - adapted from base repo pattern
+ * Initialize blockchain provider and wallet
+ */
+async function initializeProvider() {
+  try {
+    provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+    wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY!, provider);
+    tradeExecutor = new TradeExecutor();
+    await tradeExecutor.initialize();
+    
+    await initializeStorage();
+    logger.info('✅ Provider and wallet initialized');
+  } catch (error) {
+    logger.error(`Failed to initialize provider: ${(error as Error).message}`);
+    throw error;
+  }
+}
+
+/**
+ * Get wallet BNB balance
+ */
+async function getWalletBalance(): Promise<number> {
+  try {
+    const balance = await provider.getBalance(wallet.address);
+    return parseFloat(ethers.formatEther(balance));
+  } catch (error) {
+    logger.error(`Failed to get wallet balance: ${(error as Error).message}`);
+    return 0;
+  }
+}
+
+/**
+ * Execute a trade
+ */
+async function executeTrade(params: {
+  tokenAddress: string;
+  action: 'buy' | 'sell';
+  amountBNB: number;
+  slippagePercent: number;
+}): Promise<{ success: boolean; error?: string; txHash?: string }> {
+  try {
+    if (!validateTradeAmount(params.amountBNB)) {
+      throw new Error('Invalid trade amount');
+    }
+
+    const tradeParams = {
+      tokenAddress: params.tokenAddress,
+      action: params.action,
+      amountBNB: params.amountBNB,
+      slippagePercent: params.slippagePercent
+    };
+
+    const result = await tradeExecutor.executeTrade(tradeParams);
+
+    return { success: result.success, txHash: result.txHash };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Send trade execution alert
+ */
+async function alertTradeExecution(
+  tradeResult: { success: boolean; txHash?: string; error?: string },
+  tokenSymbol: string,
+  action: string
+) {
+  await telegramBotManager.sendTradeAlert(
+    action,
+    tokenSymbol,
+    0, // Amount will be filled by caller if needed
+    0, // Price will be filled by caller if needed
+    tradeResult.success
+  );
+}
+
+/**
+ * Send bot status alert
+ */
+async function alertBotStatus(status: string, message: string) {
+  const alertMessage = `🤖 *BOT ${status.toUpperCase()}*\n\n${message}\n🕐 ${new Date().toLocaleString()}`;
+  await telegramBotManager.sendAlert(alertMessage, status === 'started' ? 'success' : 'info');
+}
+
+/**
+ * Initialize telegram bot
+ */
+function initializeTelegramBot() {
+  telegramBotManager.initialize();
+}
+
+// Track state
+
+/**
+ * Main AI agent invocation - integrated with immortal AI system
  */
 async function invokeAgent(tokenAddress: string) {
   invocationCount++;
@@ -47,6 +149,12 @@ async function invokeAgent(tokenAddress: string) {
   logger.info(`\n🤖 Invocation #${invocationCount} - Analyzing ${tokenAddress}`);
 
   try {
+    // Load immortal memories on first run
+    if (invocationCount === 1) {
+      logger.info('🧠 Loading immortal agent memories...');
+      await immortalAgent.loadMemories();
+    }
+
     // Get wallet balance
     const walletBalance = await getWalletBalance();
 
@@ -59,174 +167,99 @@ async function invokeAgent(tokenAddress: string) {
 
     logger.info(`📊 Token: ${tokenData.symbol} - Price: $${tokenData.priceUsd} - Volume: $${tokenData.volume24h.toLocaleString()}`);
 
-    // Get past memories from Greenfield
-    const memoryIds = await fetchAllMemories();
-    const recentMemories = await Promise.all(
-      memoryIds.slice(-10).map(id => fetchMemory(id))
-    );
-    const memoriesText = recentMemories
-      .filter(m => m !== null)
-      .map(m => `- ${m!.tokenSymbol} ${m!.action}: ${m!.outcome || 'pending'} (${m!.aiReasoning})`)
-      .join('\n') || 'No past trades yet';
+    // Use immortal AI agent for decision making
+    const aiDecision = await immortalAgent.makeDecision(tokenAddress, tokenData, walletBalance);
+    
+    logger.info(`🧠 Immortal AI Decision: ${aiDecision.action} ${aiDecision.amount.toFixed(4)} BNB (${(aiDecision.confidence * 100).toFixed(1)}%)`);
+    logger.info(`📝 AI Reasoning: ${aiDecision.reasoning}`);
+    logger.info(`🎯 Strategy: ${aiDecision.strategy}`);
 
-    // Calculate portfolio value
-    const portfolioValue = walletBalance * 300; // Rough BNB to USD (update with real price)
-
-    // Get trading stats
-    const completedTrades = recentMemories.filter(m => m && m.outcome !== 'pending');
-    const profitableTrades = completedTrades.filter(m => m!.outcome === 'profit');
-    const stats = {
-      totalTrades: completedTrades.length,
-      winRate: completedTrades.length > 0 ? (profitableTrades.length / completedTrades.length) * 100 : 0,
-      totalPL: completedTrades.reduce((sum, m) => sum + (m!.profitLoss || 0), 0),
-      bestTrade: profitableTrades[0]?.tokenSymbol || 'None',
-      worstTrade: completedTrades.find(m => m!.outcome === 'loss')?.tokenSymbol || 'None'
-    };
-
-    // Format market data
-    const marketData = `
-Token: ${tokenData.symbol}
-Price: $${tokenData.priceUsd}
-24h Change: ${tokenData.priceChange24h.toFixed(2)}%
-24h Volume: $${tokenData.volume24h.toLocaleString()}
-Liquidity: $${tokenData.liquidity.toLocaleString()}
-Buy/Sell Pressure: ${calculateBuySellPressure(tokenData).toFixed(3)}
-Buys (24h): ${tokenData.txns24h.buys}
-Sells (24h): ${tokenData.txns24h.sells}
-    `.trim();
-
-    // Format enriched prompt
-    const enrichedPrompt = formatPrompt({
-      invocationCount,
-      walletBalance,
-      openPositions: Array.from(activePositions.entries())
-        .map(([addr, pos]) => `${pos.tokenSymbol}: ${pos.amount} BNB @ $${pos.entryPrice}`)
-        .join(', ') || 'None',
-      portfolioValue,
-      maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
-      stopLossPercentage: CONFIG.STOP_LOSS_PERCENTAGE,
-      marketData,
-      pastMemories: memoriesText,
-      stats
-    });
-
-    logger.info('📝 Sending prompt to AI...');
-
-    // Call AI with tools (adapted from base repo)
-    const response = await streamText({
-      model: openrouter('openai/gpt-4o-mini'),
-      prompt: enrichedPrompt,
-      tools: {
-        executeTrade: tool({
-          description: 'EXECUTE A REAL TRADE on PancakeSwap. Call this when confidence ≥0.7 (70%). This is the ONLY way to trade - analysis alone does NOT execute trades. You must call this tool to buy or sell!',
-          parameters: z.object({
-            tokenAddress: z.string().describe('The token contract address (0x...)'),
-            action: z.enum(['buy', 'sell']).describe('buy = enter position with BNB, sell = exit position to BNB'),
-            amountBNB: z.number().min(0.01).max(CONFIG.MAX_TRADE_AMOUNT_BNB).describe('BNB amount: 0.01-0.05 for testing, scale up after wins'),
-            reasoning: z.string().describe('Detailed reasoning with specific data points (price, volume, liquidity, signals)'),
-            confidence: z.number().min(0.7).max(1).describe('Confidence as decimal: 0.7=70%, 0.8=80%, 0.9=90%, 1.0=100%. Minimum 0.7 required'),
-          }),
-          execute: async ({ tokenAddress: tradeTokenAddress, action, amountBNB, reasoning, confidence }) => {
-            logger.info(`\n⚡ AI Decision: ${action.toUpperCase()} ${amountBNB} BNB`);
-            logger.info(`Reasoning: ${reasoning}`);
-            logger.info(`Confidence: ${(confidence * 100).toFixed(0)}%`);
-
-            // Validate confidence
-            if (confidence < 0.7) {
-              logger.warn('❌ Trade rejected: Confidence too low (<70%)');
-              return { success: false, message: 'Confidence too low' };
-            }
-
-            // Alert user
-            await alertAIDecision(
-              {
-                action,
-                amount: amountBNB,
-                confidence,
-                reason: reasoning,
-                riskLevel: confidence > 0.8 ? 'low' : 'medium'
-              },
-              tokenData.symbol,
-              tradeTokenAddress
-            );
-
-            // Execute trade
-            logger.info('🔄 Executing trade on PancakeSwap...');
-            const result = await executeTrade({
-              tokenAddress: tradeTokenAddress,
-              action,
-              amountBNB,
-              slippagePercent: CONFIG.MAX_SLIPPAGE_PERCENTAGE,
-            });
-
-            // Alert result
-            await alertTradeExecution(result, tokenData.symbol, action);
-
-            if (!result.success) {
-              logger.error(`❌ Trade failed: ${result.error}`);
-              return { success: false, message: result.error };
-            }
-
-            logger.info(`✅ Trade executed: ${result.txHash}`);
-            logger.info(`Gas used: ${result.gasUsed}`);
-
-            // Store memory on Greenfield
-            const memory: TradeMemory = {
-              id: '',
-              timestamp: Date.now(),
-              tokenAddress: tradeTokenAddress,
-              tokenSymbol: tokenData.symbol,
-              action,
-              entryPrice: parseFloat(tokenData.priceUsd),
-              amount: amountBNB,
-              outcome: 'pending',
-              aiReasoning: reasoning,
-              marketConditions: {
-                volume24h: tokenData.volume24h,
-                liquidity: tokenData.liquidity,
-                priceChange24h: tokenData.priceChange24h,
-                buySellPressure: calculateBuySellPressure(tokenData),
-              },
-            };
-
-            const memoryId = await storeMemory(memory);
-            logger.info(`💾 Memory stored on Greenfield: ${memoryId}`);
-
-            // Track position
-            if (action === 'buy') {
-              activePositions.set(tradeTokenAddress, {
-                amount: amountBNB,
-                entryPrice: parseFloat(tokenData.priceUsd),
-                memoryId,
-                tokenSymbol: tokenData.symbol,
-              });
-            } else if (action === 'sell') {
-              activePositions.delete(tradeTokenAddress);
-            }
-
-            return {
-              success: true,
-              message: `Trade executed successfully! Tx: ${result.txHash}`,
-              txHash: result.txHash,
-              memoryId,
-            };
-          },
-        }),
-      },
-      maxSteps: 5, // Allow AI to think and use tools
-    });
-
-    // Stream and log AI response
-    logger.info('\n💭 AI Response:');
-    for await (const chunk of response.textStream) {
-      process.stdout.write(chunk);
+    // Check cross-chain arbitrage opportunities
+    const crossChainOps = await crossChainEngine.discoverArbitrageOpportunities();
+    if (crossChainOps.length > 0) {
+      logger.info(`🌐 Found ${crossChainOps.length} cross-chain arbitrage opportunities`);
+      const bestOpp = crossChainOps[0];
+      if (bestOpp && bestOpp.profitPotential > 5) { // 5% minimum profit
+        logger.info(`🚀 High-value arbitrage: ${bestOpp.profitPotential.toFixed(2)}% profit potential`);
+      }
     }
-    console.log('\n');
 
-    const finalText = await response.text;
+    // Execute trade if AI decision confidence is high enough
+    if (aiDecision.action !== 'HOLD' && aiDecision.confidence >= immortalAgent.getPersonality().confidenceThreshold) {
+      try {
+        const tradeParams = {
+          tokenAddress,
+          action: aiDecision.action.toLowerCase() as 'buy' | 'sell',
+          amountBNB: aiDecision.amount * walletBalance,
+          slippagePercent: 2
+        };
+
+        logger.info(`� Executing immortal AI trade: ${tradeParams.action} ${tradeParams.amountBNB.toFixed(4)} BNB`);
+        
+        const tradeResult = await executeTrade(tradeParams);
+        
+        if (tradeResult.success) {
+          // Update active positions
+          if (tradeParams.action === 'buy') {
+            activePositions.set(tokenAddress, {
+              amount: tradeParams.amountBNB,
+              entryPrice: parseFloat(tokenData.priceUsd),
+              memoryId: `trade_${Date.now()}`,
+              tokenSymbol: tokenData.symbol
+            });
+          } else {
+            activePositions.delete(tokenAddress);
+          }
+
+          // Alert successful trade
+          await alertTradeExecution(tradeResult, tokenData.symbol, tradeParams.action);
+          
+          // Store immortal memory of this trade
+          const tradeMemory = {
+            id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            tokenSymbol: tokenData.symbol,
+            tokenAddress,
+            action: aiDecision.action.toLowerCase() as 'buy' | 'sell',
+            amount: tradeParams.amountBNB,
+            entryPrice: parseFloat(tokenData.priceUsd),
+            exitPrice: undefined,
+            outcome: 'pending' as 'pending',
+            profitLoss: undefined,
+            aiReasoning: aiDecision.reasoning,
+            marketConditions: {
+              volume24h: tokenData.volume24h,
+              liquidity: tokenData.liquidity,
+              priceChange24h: tokenData.priceChange24h,
+              buySellPressure: calculateBuySellPressure(tokenData)
+            }
+          };
+          
+          await storeMemory(tradeMemory);
+          logger.info(`🧠 Trade memory stored in immortal storage`);
+          
+        } else {
+          logger.error(`❌ Trade execution failed: ${tradeResult.error}`);
+        }
+        
+      } catch (error) {
+        logger.error(`❌ Trade execution error: ${(error as Error).message}`);
+      }
+      
+    } else if (aiDecision.action === 'HOLD') {
+      logger.info(`⏸️  AI recommends HOLD - ${aiDecision.reasoning}`);
+    } else {
+      logger.info(`⚠️  AI confidence below threshold (${(aiDecision.confidence * 100).toFixed(1)}% < ${(immortalAgent.getPersonality().confidenceThreshold * 100).toFixed(1)}%)`);
+    }
+
+    // Evolve strategies periodically
+    if (invocationCount % 10 === 0) {
+      logger.info('🧬 Evolving trading strategies...');
+      await strategyEngine.evolveStrategies();
+    }
+
     logger.info(`\n✅ Invocation #${invocationCount} complete`);
-
-    return finalText;
+    return `Immortal AI analysis complete. Decision: ${aiDecision.action} with ${(aiDecision.confidence * 100).toFixed(1)}% confidence.`;
 
   } catch (error) {
     logger.error(`Error in invocation #${invocationCount}: ${(error as Error).message}`);
@@ -243,7 +276,7 @@ async function main() {
 
   // Initialize
   await initializeProvider();
-  await initializeTelegramBot();
+  initializeTelegramBot();
 
   const balance = await getWalletBalance();
   logger.info(`💰 Wallet Balance: ${balance.toFixed(4)} BNB`);
@@ -310,7 +343,7 @@ process.on('SIGTERM', async () => {
 });
 
 // Start if run directly
-if (import.meta.main) {
+if (require.main === module || process.argv[1]?.endsWith('index.ts')) {
   startBot().catch((error) => {
     logger.error(`Fatal error: ${error.message}`);
     process.exit(1);

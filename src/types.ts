@@ -49,9 +49,5 @@ export interface MarketData {
   buySellPressure: number;
 }
 
-export default {
-  AIDecision,
-  TradeResult,
-  TokenInfo,
-  MarketData,
-};
+// Remove the default export since it's causing the "used as value" errors
+// All exports are type-only interfaces, they should be imported with 'type'

@@ -50,19 +50,36 @@ export interface SwapResult {
  */
 export class PancakeSwapV3 {
   private provider: ethers.Provider;
-  private wallet: ethers.Wallet;
+  private wallet: ethers.Wallet | null;
   private chainId: number;
   private wbnb: Token;
   private factoryAddress: string;
   private routerAddress: string;
+  private hasValidWallet: boolean;
 
   constructor() {
     this.provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
-    this.wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY, this.provider);
+    
+    // Check if we have a valid private key
+    const privateKey = CONFIG.WALLET_PRIVATE_KEY;
+    this.hasValidWallet = !!(privateKey && 
+      privateKey !== 'your_test_wallet_private_key_here' &&
+      privateKey !== 'your_wallet_private_key_here' &&
+      privateKey.length > 20);
+
+    if (this.hasValidWallet) {
+      this.wallet = new ethers.Wallet(privateKey, this.provider);
+      logger.info('🔑 Wallet initialized for trading');
+    } else {
+      this.wallet = null;
+      logger.warn('⚠️  No valid wallet private key - trading disabled');
+      logger.warn('   API endpoints will work, but trade execution will be simulated');
+    }
+    
     this.chainId = CONFIG.CHAIN_ID;
 
     // WBNB token
-    const wbnbAddress = CONFIG.WBNB_ADDRESS;
+    const wbnbAddress = CONFIG.WBNB_ADDRESS as `0x${string}`;
     this.wbnb = new Token(this.chainId, wbnbAddress, 18, 'WBNB', 'Wrapped BNB');
 
     this.factoryAddress = CONFIG.PANCAKE_FACTORY;
@@ -249,12 +266,12 @@ export class PancakeSwapV3 {
     const contract = new ethers.Contract(address, ERC20_ABI, this.provider);
 
     const [decimals, symbol, name] = await Promise.all([
-      contract.decimals(),
-      contract.symbol(),
-      contract.name(),
+      contract.decimals?.() || 18,
+      contract.symbol?.() || 'UNKNOWN',
+      contract.name?.() || 'Unknown Token',
     ]);
 
-    return new Token(this.chainId, address, decimals, symbol, name);
+    return new Token(this.chainId, address as `0x${string}`, decimals, symbol, name);
   }
 
   /**
@@ -285,16 +302,20 @@ export class PancakeSwapV3 {
     try {
       const factory = new ethers.Contract(this.factoryAddress, FACTORY_ABI, this.provider);
 
-      const poolAddress = await factory.getPool(tokenA.address, tokenB.address, fee);
-      if (poolAddress === ethers.ZeroAddress) {
+      const poolAddress = await factory.getPool?.(tokenA.address, tokenB.address, fee);
+      if (!poolAddress || poolAddress === ethers.ZeroAddress) {
         return null;
       }
 
       const poolContract = new ethers.Contract(poolAddress, POOL_ABI, this.provider);
       const [slot0, liquidity] = await Promise.all([
-        poolContract.slot0(),
-        poolContract.liquidity(),
+        poolContract.slot0?.(),
+        poolContract.liquidity?.(),
       ]);
+
+      if (!slot0 || !liquidity) {
+        return null;
+      }
 
       // Sort tokens (Pool requires token0 < token1)
       const [token0, token1] =
@@ -328,6 +349,10 @@ export class PancakeSwapV3 {
     isExactInput: boolean;
     isBuyingWithBNB: boolean;
   }): Promise<ethers.ContractTransactionReceipt> {
+    if (!this.hasValidWallet || !this.wallet) {
+      throw new Error('Cannot execute swap - no wallet configured');
+    }
+    
     const router = new ethers.Contract(this.routerAddress, ROUTER_V3_ABI, this.wallet);
 
     const swapParams = {
@@ -343,6 +368,10 @@ export class PancakeSwapV3 {
     const value = params.isBuyingWithBNB ? params.amountIn : '0';
 
     logger.info('  Executing swap on-chain...');
+
+    if (!router.exactInputSingle) {
+      throw new Error('Router contract method exactInputSingle not available');
+    }
 
     const tx = await router.exactInputSingle(swapParams, {
       value,
@@ -364,7 +393,15 @@ export class PancakeSwapV3 {
     amount: string,
     decimals: number
   ): Promise<void> {
+    if (!this.hasValidWallet || !this.wallet) {
+      throw new Error('Cannot approve token - no wallet configured');
+    }
+    
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+
+    if (!token.allowance || !token.approve) {
+      throw new Error('Token contract methods not available');
+    }
 
     const allowance = await token.allowance(this.wallet.address, this.routerAddress);
     const required = ethers.parseUnits(amount, decimals);
@@ -381,6 +418,10 @@ export class PancakeSwapV3 {
    * Get wallet balance
    */
   async getBalance(): Promise<number> {
+    if (!this.hasValidWallet || !this.wallet) {
+      logger.warn('🚨 Cannot get balance - no wallet configured');
+      return 0;
+    }
     const balance = await this.provider.getBalance(this.wallet.address);
     return parseFloat(ethers.formatEther(balance));
   }
@@ -389,10 +430,82 @@ export class PancakeSwapV3 {
    * Get token balance
    */
   async getTokenBalance(tokenAddress: string): Promise<number> {
+    if (!this.hasValidWallet || !this.wallet) {
+      logger.warn('🚨 Cannot get token balance - no wallet configured');
+      return 0;
+    }
+    
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
+    
+    if (!token.balanceOf || !token.decimals) {
+      throw new Error('Token contract methods not available');
+    }
+    
     const balance = await token.balanceOf(this.wallet.address);
     const decimals = await token.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
+  }
+
+  /**
+   * Get token price in BNB
+   */
+  async getTokenPrice(tokenAddress: string): Promise<number> {
+    try {
+      const targetToken = await this.createTokenFromAddress(tokenAddress);
+      const pool = await this.findBestPool(this.wbnb, targetToken);
+      
+      if (!pool) {
+        throw new Error('No liquidity pool found for price calculation');
+      }
+
+      // Calculate price using pool sqrtPriceX96
+      const token0IsWBNB = pool.token0.address.toLowerCase() === this.wbnb.address.toLowerCase();
+      const price = parseFloat(pool.token0Price.toSignificant(6));
+      
+      // If WBNB is token0, return price directly, otherwise return inverse
+      return token0IsWBNB ? 1 / price : price;
+    } catch (error) {
+      logger.error(`Failed to get token price: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get quote for a specific amount (for price validation)
+   */
+  async getQuote(tokenAddress: string, amountBNB: number): Promise<{ expectedTokens: number; pricePerToken: number }> {
+    try {
+      const targetToken = await this.createTokenFromAddress(tokenAddress);
+      const pool = await this.findBestPool(this.wbnb, targetToken);
+      
+      if (!pool) {
+        throw new Error('No liquidity pool found for quote');
+      }
+
+      const amountIn = CurrencyAmount.fromRawAmount(
+        this.wbnb,
+        ethers.parseEther(amountBNB.toString()).toString()
+      );
+
+      const route = new Route([pool], this.wbnb, targetToken);
+      const trade = Trade.createUncheckedTrade({
+        route,
+        inputAmount: amountIn,
+        outputAmount: CurrencyAmount.fromRawAmount(targetToken, 0),
+        tradeType: TradeType.EXACT_INPUT,
+      });
+
+      const expectedTokens = parseFloat(trade.outputAmount.toSignificant(6));
+      const pricePerToken = amountBNB / expectedTokens;
+
+      return {
+        expectedTokens,
+        pricePerToken
+      };
+    } catch (error) {
+      logger.error(`Failed to get quote: ${error}`);
+      throw error;
+    }
   }
 }
 
