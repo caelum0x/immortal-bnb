@@ -13,6 +13,7 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
+import { startAPIServer } from './api-server';
 import { formatPrompt } from './prompt';
 import { CONFIG } from './config';
 import { logger } from './utils/logger';
@@ -307,6 +308,10 @@ process.on('SIGTERM', async () => {
 
 // Start if run directly
 if (import.meta.main) {
+  // Start API server for frontend
+  startAPIServer();
+
+  // Start trading bot
   startBot().catch((error) => {
     logger.error(`Fatal error: ${error.message}`);
     process.exit(1);
