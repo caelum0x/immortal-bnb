@@ -24,6 +24,7 @@ import { initializeTelegramBot, alertBotStatus, alertAIDecision, alertTradeExecu
 import { TradeMemory } from './agent/learningLoop';
 import { calculateBuySellPressure } from './data/marketFetcher';
 import { BotState } from './bot-state';
+import { validateOrExit, getConfigSummary } from './utils/envValidator';
 
 // Initialize OpenRouter
 const openrouter = createOpenRouter({
@@ -379,21 +380,13 @@ process.on('SIGTERM', async () => {
 // Start if run directly
 if (import.meta.main) {
   logger.info('🌟 Immortal AI Trading Bot - Production Mode');
-  logger.info('📍 Network: BNB Chain ' + (CONFIG.NETWORK === 'mainnet' ? 'MAINNET ⚠️' : 'TESTNET'));
   logger.info('');
 
-  // Validate critical environment variables
-  const requiredVars = ['WALLET_PRIVATE_KEY', 'OPENROUTER_API_KEY', 'RPC_URL_TESTNET'];
-  const missingVars = requiredVars.filter(v => !process.env[v] || process.env[v]?.startsWith('0x000000'));
+  // Comprehensive environment validation
+  validateOrExit();
 
-  if (missingVars.length > 0) {
-    logger.error(`❌ Missing required environment variables: ${missingVars.join(', ')}`);
-    logger.error('Please configure .env file before starting the bot');
-    process.exit(1);
-  }
-
-  logger.info('✅ Environment variables validated');
-  logger.info('');
+  // Show configuration summary
+  logger.info(getConfigSummary());
 
   // Start API server for frontend
   startAPIServer();
@@ -401,7 +394,8 @@ if (import.meta.main) {
 
   // Start background loop
   logger.info('🤖 Bot is ready - use the frontend to start trading');
-  logger.info('🌐 Frontend should connect to: http://localhost:3001');
+  logger.info('🌐 Frontend: http://localhost:3000');
+  logger.info('🌐 API Server: http://localhost:' + CONFIG.API_PORT);
   logger.info('');
 
   backgroundLoop().catch((error) => {
