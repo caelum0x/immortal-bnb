@@ -5,13 +5,13 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
-import crypto from 'crypto';
+import { randomBytes } from 'crypto';
 
 /**
  * Generate a secure API key (run once and save to .env)
  */
 export function generateApiKey(): string {
-  return crypto.randomBytes(32).toString('hex');
+  return randomBytes(32).toString('hex');
 }
 
 /**
