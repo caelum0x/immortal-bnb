@@ -1,28 +1,21 @@
 /**
- * Token Discovery Component
- * Displays trending tokens from DexScreener
+ * Production Token Discovery Component
+ * Real-time trending tokens from DexScreener - NO MOCKS
  */
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import { discoverTokens, safeApiCall, mockTokens, TokenInfo } from '@/lib/api';
+import { useState } from 'react';
+import { discoverTokens, TokenInfo } from '@/lib/api';
+import { usePolling } from '@/hooks/usePolling';
 
 export default function TokenDiscovery() {
-  const [tokens, setTokens] = useState<TokenInfo[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadTokens();
-  }, []);
-
-  const loadTokens = async () => {
-    setIsLoading(true);
-    const { data } = await safeApiCall(() => discoverTokens(10), mockTokens);
-    setTokens(data);
-    setIsLoading(false);
-  };
+  const { data: tokens, error, loading, refetch } = usePolling<TokenInfo[]>(
+    () => discoverTokens(10),
+    { interval: 120000 } // Refresh every 2 minutes
+  );
 
   const copyToClipboard = (address: string) => {
     navigator.clipboard.writeText(address);
@@ -30,7 +23,7 @@ export default function TokenDiscovery() {
     setTimeout(() => setCopiedAddress(null), 2000);
   };
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="space-y-4">
         {[...Array(5)].map((_, i) => (
@@ -48,6 +41,29 @@ export default function TokenDiscovery() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="card p-6">
+          <h2 className="text-2xl font-bold mb-2">🔍 Discover Trending Tokens</h2>
+          <p className="text-gray-400">Real-time from DexScreener on BNB Chain</p>
+        </div>
+        <div className="card p-6 bg-red-900/20 border border-red-500">
+          <div className="flex items-center">
+            <span className="text-2xl mr-3">❌</span>
+            <div>
+              <p className="font-semibold text-red-500">Failed to Load Tokens</p>
+              <p className="text-sm text-gray-300">{error.message}</p>
+              <button onClick={refetch} className="btn-secondary mt-3 text-sm">
+                🔄 Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -60,9 +76,9 @@ export default function TokenDiscovery() {
             </p>
           </div>
           <button
-            onClick={loadTokens}
+            onClick={refetch}
             className="btn-secondary"
-            disabled={isLoading}
+            disabled={loading}
           >
             🔄 Refresh
           </button>
@@ -70,7 +86,7 @@ export default function TokenDiscovery() {
       </div>
 
       {/* Tokens List */}
-      {tokens.length === 0 ? (
+      {!tokens || tokens.length === 0 ? (
         <div className="card p-12 text-center">
           <div className="text-6xl mb-4">🔎</div>
           <h3 className="text-xl font-bold mb-2">No Tokens Found</h3>

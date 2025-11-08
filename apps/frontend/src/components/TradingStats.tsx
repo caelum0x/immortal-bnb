@@ -1,31 +1,20 @@
 /**
- * Trading Stats Component
- * Displays overview of trading performance
+ * Production Trading Stats Component
+ * Real-time display of trading performance - NO MOCKS
  */
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getTradingStats, safeApiCall, mockStats, TradingStats as StatsType } from '@/lib/api';
+import { getTradingStats, TradingStats as StatsType } from '@/lib/api';
+import { usePolling } from '@/hooks/usePolling';
 
 export default function TradingStats() {
-  const [stats, setStats] = useState<StatsType | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: stats, error, loading } = usePolling<StatsType>(
+    () => getTradingStats(),
+    { interval: 30000 } // Refresh every 30 seconds
+  );
 
-  useEffect(() => {
-    loadStats();
-    // Refresh stats every 30 seconds
-    const interval = setInterval(loadStats, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadStats = async () => {
-    const { data } = await safeApiCall(() => getTradingStats(), mockStats);
-    setStats(data);
-    setIsLoading(false);
-  };
-
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
@@ -38,7 +27,28 @@ export default function TradingStats() {
     );
   }
 
-  if (!stats) return null;
+  if (error) {
+    return (
+      <div className="card p-6 bg-red-900/20 border border-red-500">
+        <div className="flex items-center">
+          <span className="text-2xl mr-3">❌</span>
+          <div>
+            <p className="font-semibold text-red-500">Failed to Load Stats</p>
+            <p className="text-sm text-gray-300">{error.message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <div className="card p-6 text-center">
+        <div className="text-4xl mb-2">📊</div>
+        <p className="text-gray-400">No trading data available</p>
+      </div>
+    );
+  }
 
   const statCards = [
     {

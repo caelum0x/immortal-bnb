@@ -1,36 +1,29 @@
 /**
- * Memories View Component
- * Displays trading memories stored on BNB Greenfield
+ * Production Memories View Component
+ * Displays trading memories from BNB Greenfield - NO MOCKS
  */
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getMemories, safeApiCall, mockMemories, TradeMemory } from '@/lib/api';
+import { useState } from 'react';
+import { getMemories, TradeMemory } from '@/lib/api';
+import { usePolling } from '@/hooks/usePolling';
 import { format } from 'date-fns';
 
 export default function MemoriesView() {
-  const [memories, setMemories] = useState<TradeMemory[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'profit' | 'loss' | 'pending'>('all');
 
-  useEffect(() => {
-    loadMemories();
-  }, []);
+  const { data: memories, error, loading, refetch } = usePolling<TradeMemory[]>(
+    () => getMemories(50),
+    { interval: 60000 } // Refresh every minute
+  );
 
-  const loadMemories = async () => {
-    setIsLoading(true);
-    const { data } = await safeApiCall(() => getMemories(50), mockMemories);
-    // Sort by timestamp descending (most recent first)
-    const sorted = data.sort((a, b) => b.timestamp - a.timestamp);
-    setMemories(sorted);
-    setIsLoading(false);
-  };
-
-  const filteredMemories = memories.filter((memory) => {
-    if (filter === 'all') return true;
-    return memory.outcome === filter;
-  });
+  const filteredMemories = (memories || [])
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .filter((memory) => {
+      if (filter === 'all') return true;
+      return memory.outcome === filter;
+    });
 
   const getOutcomeBadge = (outcome: TradeMemory['outcome']) => {
     switch (outcome) {
@@ -53,7 +46,7 @@ export default function MemoriesView() {
     );
   };
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="space-y-4">
         {[...Array(3)].map((_, i) => (
@@ -69,6 +62,29 @@ export default function MemoriesView() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="card p-6">
+          <h2 className="text-2xl font-bold mb-2">🧠 Trading Memories</h2>
+          <p className="text-gray-400">Immortal memory stored on BNB Greenfield</p>
+        </div>
+        <div className="card p-6 bg-red-900/20 border border-red-500">
+          <div className="flex items-center">
+            <span className="text-2xl mr-3">❌</span>
+            <div>
+              <p className="font-semibold text-red-500">Failed to Load Memories</p>
+              <p className="text-sm text-gray-300">{error.message}</p>
+              <button onClick={refetch} className="btn-secondary mt-3 text-sm">
+                🔄 Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -77,13 +93,13 @@ export default function MemoriesView() {
           <div>
             <h2 className="text-2xl font-bold mb-2">🧠 Trading Memories</h2>
             <p className="text-gray-400">
-              Immortal memory stored on BNB Greenfield - {memories.length} total
+              Immortal memory stored on BNB Greenfield - {memories?.length || 0} total
             </p>
           </div>
           <button
-            onClick={loadMemories}
+            onClick={refetch}
             className="btn-secondary"
-            disabled={isLoading}
+            disabled={loading}
           >
             🔄 Refresh
           </button>
