@@ -1,16 +1,19 @@
 # 🚀 Quick Start Guide
 
-Get your Immortal AI Trading Bot running in 10 minutes!
+Get the Immortal AI Trading Bot running in 5 minutes!
 
 ## ✅ What This Bot Does
 
-1. **Fetches market data** from DexScreener for BNB Chain tokens
-2. **AI analyzes** data using GPT-4o-mini via OpenRouter
-3. **Executes trades** on PancakeSwap when AI has high confidence
-4. **Stores memories** on BNB Greenfield for immortal learning
-5. **Sends alerts** via Telegram for all actions
+1. **Frontend Dashboard** - Control bot from web interface (Next.js)
+2. **Fetch Market Data** - Real-time from DexScreener for BNB Chain tokens
+3. **AI Analysis** - Uses GPT-4o-mini via OpenRouter for intelligent decisions
+4. **Execute Trades** - Automated trading on PancakeSwap when AI is confident
+5. **Immortal Memory** - Stores all trades on BNB Greenfield for permanent learning
+6. **Telegram Alerts** - Get notified of all trades and events
 
 **Based on**: https://github.com/hkirat/ai-trading-agent (adapted for BNB Chain)
+
+**Architecture**: Frontend-controlled backend with real-time polling (NO MOCKS)
 
 ---
 
@@ -72,99 +75,182 @@ Get your Immortal AI Trading Bot running in 10 minutes!
 git clone https://github.com/caelum0x/immortal-bnb.git
 cd immortal-bnb
 
-# 2. Install dependencies
-npm install
+# 2. Install backend dependencies
+bun install
 
-# 3. Create .env file
+# 3. Install frontend dependencies
+cd apps/frontend
+bun install
+cd ../..
+
+# 4. Create .env files
 cp .env.example .env
+cp apps/frontend/.env.example apps/frontend/.env.local
 ```
 
 ---
 
 ## 🔧 Configuration (2 minutes)
 
-Edit `.env` file:
+### Backend Configuration (.env)
+
+Edit `.env` file in the root directory:
 
 ```bash
-# REQUIRED: OpenRouter API Key
-OPENROUTER_API_KEY=sk-or-your-key-here
+# ===== CRITICAL - REQUIRED =====
+OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+WALLET_PRIVATE_KEY=0xYOUR_ACTUAL_PRIVATE_KEY_HERE
 
-# REQUIRED: BNB Wallet
-WALLET_PRIVATE_KEY=your-private-key-here
-BNB_RPC=https://bsc-testnet.bnbchain.org
+# ===== NETWORK =====
+RPC_URL_TESTNET=https://opbnb-testnet-rpc.bnbchain.org
 NETWORK=testnet
+CHAIN_ID=5611
 
-# OPTIONAL: Telegram Alerts
+# ===== API SERVER =====
+API_PORT=3001
+
+# ===== OPTIONAL: Telegram Alerts =====
 TELEGRAM_BOT_TOKEN=your-bot-token-here
 TELEGRAM_CHAT_ID=your-chat-id-here
 
-# Trading Settings (SAFE DEFAULTS)
-MAX_TRADE_AMOUNT_BNB=0.05
-STOP_LOSS_PERCENTAGE=5
+# ===== TRADING SETTINGS (SAFE DEFAULTS) =====
+MAX_TRADE_AMOUNT_BNB=1.0
+STOP_LOSS_PERCENTAGE=10
 MAX_SLIPPAGE_PERCENTAGE=2
 BOT_LOOP_INTERVAL_MS=300000
+```
+
+### Frontend Configuration (apps/frontend/.env.local)
+
+Edit `.env.local` in the frontend directory:
+
+```bash
+# API Configuration
+NEXT_PUBLIC_API_URL=http://localhost:3001
+
+# Network
+NEXT_PUBLIC_USE_MAINNET=false
+
+# WalletConnect (get from https://cloud.walletconnect.com/)
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id_here
 ```
 
 ---
 
 ## 🎯 Running the Bot (1 minute)
 
+### Development Mode (Recommended)
+
+**Terminal 1 - Backend**:
 ```bash
-# Option 1: Run once
-npm start
+# Start backend server + bot
+bun run dev
 
-# Option 2: Development mode (auto-reload)
-npm run dev
-
-# The bot will:
-# 1. Check your BNB balance
-# 2. Fetch trending tokens from DexScreener
-# 3. Analyze each token with AI
-# 4. Execute trades if AI is confident (>70%)
-# 5. Store memories on Greenfield
-# 6. Send Telegram alerts
-# 7. Repeat every 5 minutes
+# You'll see:
+# 🌟 Immortal AI Trading Bot - Production Mode
+# ✅ Environment validation passed
+# 🤖 Bot is ready - use the frontend to start trading
+# 🌐 API Server: http://localhost:3001
 ```
+
+**Terminal 2 - Frontend**:
+```bash
+# Start frontend dashboard
+cd apps/frontend
+bun run dev
+
+# You'll see:
+# ▲ Next.js 14.x.x
+# - Local:        http://localhost:3000
+# - ready in Xms
+```
+
+### Production Mode
+
+```bash
+# Build frontend
+cd apps/frontend
+bun run build
+cd ../..
+
+# Run backend
+bun run start
+```
+
+### Start Trading
+
+1. Open **http://localhost:3000** in your browser
+2. Click **"Connect Wallet"** (top right)
+3. Configure in Dashboard tab:
+   - **Watchlist**: Add token addresses OR leave empty for auto-discovery
+   - **Risk Level**: 1-10 (start with 3-5)
+4. Click **"🚀 Start Trading Bot"**
+5. Watch live trades in:
+   - **Dashboard**: Bot status and controls
+   - **Memories**: All trade history from Greenfield
+   - **Discover**: Trending tokens from DexScreener
+   - **Stats**: Win rate, P/L tracking
 
 ---
 
 ## 📊 What You'll See
 
+### Backend Console (Terminal 1)
+
 ```bash
-🚀 Starting Immortal AI Trading Bot...
-📍 Network: BNB Chain TESTNET
-💰 Wallet Balance: 0.4850 BNB
-📈 Fetching trending tokens...
-Found 3 trending tokens
+🌟 Immortal AI Trading Bot - Production Mode
 
-🤖 Invocation #1 - Analyzing 0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c
-📊 Token: BTCB - Price: $67,234.56 - Volume: $1,245,678.00
+✅ Environment validation passed
 
-📝 Sending prompt to AI...
+📋 Current Configuration:
+Network: TESTNET
+Chain ID: 5611
+RPC: https://opbnb-testnet-rpc.bnbchain.org...
+Wallet: 0x1234567890...
 
-💭 AI Response:
-Based on my analysis of BTCB:
+💰 Trading Parameters:
+  Max Trade: 1.0 BNB
+  Stop Loss: 10%
+  Slippage: 2%
+  Interval: 300s
 
-**Market Conditions:**
-- Price: $67,234.56 (up +2.3% in 24h)
-- Volume: $1.2M (strong interest)
-- Liquidity: $890K (sufficient for safe trading)
-- Buy/Sell Pressure: 0.45 (bullish accumulation)
-- Transactions: 234 buys vs 156 sells
+🔌 Integrations:
+  OpenRouter: ✅ Configured
+  Telegram: ✅ Configured
+  Greenfield: ⚪ Optional
 
-**Decision: HOLD**
-
-While the metrics look decent, this token already has significant
-volume and the profit potential for a small trade is limited.
-I recommend waiting for a better opportunity with higher potential
-upside. Confidence: 60%
-
-✅ Invocation #1 complete
-
-🤖 Invocation #2 - Analyzing 0x...
-...
-
+API server listening on port 3001
+🤖 Bot is ready - use the frontend to start trading
 ```
+
+### Frontend Dashboard (Browser)
+
+**Dashboard Tab**:
+- ✅ Bot status (Running/Stopped)
+- ⚙️ Token watchlist configuration
+- 🎚️ Risk level slider (1-10)
+- 🚀 Start/Stop button
+- 📊 Current configuration display
+
+**Trading Stats**:
+- 📈 Total trades: 12
+- ✅ Win rate: 67%
+- 💵 Total P/L: +0.15 BNB
+- 📊 Real-time updates every 30s
+
+**Memories Tab**:
+- 📜 All trades from Greenfield
+- 🔍 Filter by profit/loss/pending
+- 🧠 AI reasoning for each trade
+- 📈 Market conditions snapshot
+- 🔄 Auto-refresh every minute
+
+**Discover Tab**:
+- 🔥 Trending tokens from DexScreener
+- 💰 Price, volume, liquidity data
+- 📋 Copy contract addresses
+- 🔗 Links to DexScreener & PancakeSwap
+- 🔄 Auto-refresh every 2 minutes
 
 ---
 
