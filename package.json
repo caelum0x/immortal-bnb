@@ -19,7 +19,10 @@
     "docker:run": "docker-compose up -d",
     "docker:stop": "docker-compose down",
     "docker:logs": "docker-compose logs -f bot",
-    "validate": "npx ts-node scripts/validate-deployment.ts"
+    "validate": "npx ts-node scripts/validate-deployment.ts",
+    "perf": "bun run scripts/performance.ts --current",
+    "perf:report": "bun run scripts/performance.ts --report",
+    "perf:collect": "bun run scripts/performance.ts --collect"
   },
   "keywords": [
     "ai",

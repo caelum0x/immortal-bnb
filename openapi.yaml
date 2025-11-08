@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: Immortal AI Trading Bot API
+  description: |
+    REST API for controlling and monitoring the Immortal AI Trading Bot.
+
+    ## Features
+    - Start/stop bot with custom configurations
+    - Monitor trading performance in real-time
+    - Access trade history from BNB Greenfield
+    - Discover trending tokens
+    - View AI decision logs
+
+    ## Authentication
+    API key authentication is optional but recommended for production.
+    Include `X-API-Key` header with your API key.
+
+    ## Rate Limits
+    - Bot control endpoints: 10 requests/minute
+    - Read-only endpoints: 200 requests/15 minutes
+    - Health check: 300 requests/15 minutes
+
+  version: 1.0.0
+  contact:
+    name: Immortal Bot Support
+    email: support@immortalbot.io
+    url: https://github.com/caelum0x/immortal-bnb
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3001
+    description: Local development server
+  - url: https://api.immortalbot.io
+    description: Production server
+
+tags:
+  - name: Bot Control
+    description: Start, stop, and configure the trading bot
+  - name: Trading Data
+    description: Access trading statistics and history
+  - name: Market Data
+    description: Discover trending tokens and market data
+  - name: Memory
+    description: Access immortal memory stored on BNB Greenfield
+  - name: Health
+    description: Health check and system status
+
+paths:
+  /health:
+    get:
+      summary: Health Check
+      description: Check if the API server is running and healthy
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: number
+                    example: 1704067200000
+                  botRunning:
+                    type: boolean
+                    example: true
+
+  /api/start-bot:
+    post:
+      summary: Start Trading Bot
+      description: Start the trading bot with specified configuration
+      tags:
+        - Bot Control
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - risk
+              properties:
+                tokens:
+                  type: array
+                  description: Token addresses to trade (leave empty for auto-discovery)
+                  maxItems: 10
+                  items:
+                    type: string
+                    pattern: '^0x[a-fA-F0-9]{40}$'
+                  example: ["0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"]
+                risk:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  description: Risk level (1=lowest, 10=highest)
+                  example: 5
+      responses:
+        '200':
+          description: Bot started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Bot started
+                  config:
+                    $ref: '#/components/schemas/BotConfig'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /api/stop-bot:
+    post:
+      summary: Stop Trading Bot
+      description: Stop the trading bot immediately
+      tags:
+        - Bot Control
+      responses:
+        '200':
+          description: Bot stopped successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Bot stopped
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /api/bot-status:
+    get:
+      summary: Get Bot Status
+      description: Get current bot running status and configuration
+      tags:
+        - Bot Control
+      responses:
+        '200':
+          description: Bot status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  running:
+                    type: boolean
+                    example: true
+                  config:
+                    $ref: '#/components/schemas/BotConfig'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /api/trading-stats:
+    get:
+      summary: Get Trading Statistics
+      description: Get comprehensive trading performance statistics
+      tags:
+        - Trading Data
+      responses:
+        '200':
+          description: Trading statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradingStats'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /api/trade-logs:
+    get:
+      summary: Get Trade Logs
+      description: Get recent trade execution logs
+      tags:
+        - Trading Data
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of logs to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Trade logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TradeLog'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /api/memories:
+    get:
+      summary: Get Trade Memories
+      description: Get trade history stored on BNB Greenfield
+      tags:
+        - Memory
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of memories to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Memories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Memory'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /api/discover-tokens:
+    get:
+      summary: Discover Trending Tokens
+      description: Get trending tokens from DexScreener
+      tags:
+        - Market Data
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of tokens to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Trending tokens retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrendingToken'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+components:
+  schemas:
+    BotConfig:
+      type: object
+      properties:
+        tokens:
+          type: array
+          items:
+            type: string
+          example: ["0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"]
+        riskLevel:
+          type: integer
+          example: 5
+        maxTradeAmount:
+          type: number
+          example: 1.0
+        stopLoss:
+          type: number
+          example: 10
+        interval:
+          type: number
+          example: 300000
+        network:
+          type: string
+          example: testnet
+
+    TradingStats:
+      type: object
+      properties:
+        totalTrades:
+          type: integer
+          example: 42
+        profitableTrades:
+          type: integer
+          example: 28
+        losingTrades:
+          type: integer
+          example: 14
+        winRate:
+          type: number
+          format: float
+          example: 66.67
+        totalProfit:
+          type: number
+          format: float
+          example: 2.5
+        totalLoss:
+          type: number
+          format: float
+          example: 0.8
+        netProfit:
+          type: number
+          format: float
+          example: 1.7
+
+    TradeLog:
+      type: object
+      properties:
+        timestamp:
+          type: number
+          example: 1704067200000
+        action:
+          type: string
+          enum: [buy, sell, hold]
+          example: buy
+        token:
+          type: string
+          example: "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+        amount:
+          type: number
+          example: 0.05
+        price:
+          type: number
+          example: 0.00012
+        confidence:
+          type: number
+          example: 0.85
+        reason:
+          type: string
+          example: "Strong buy pressure, high volume"
+        outcome:
+          type: string
+          enum: [pending, profit, loss]
+          example: profit
+        profitLoss:
+          type: number
+          example: 0.02
+
+    Memory:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "mem_1704067200000"
+        timestamp:
+          type: number
+          example: 1704067200000
+        action:
+          type: string
+          example: buy
+        token:
+          type: string
+          example: "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+        amount:
+          type: number
+          example: 0.05
+        outcome:
+          type: string
+          example: profit
+        profitLoss:
+          type: number
+          example: 0.02
+        marketConditions:
+          type: object
+          properties:
+            volume24h:
+              type: number
+            liquidity:
+              type: number
+            priceChange24h:
+              type: number
+
+    TrendingToken:
+      type: object
+      properties:
+        address:
+          type: string
+          example: "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+        name:
+          type: string
+          example: "PancakeSwap Token"
+        symbol:
+          type: string
+          example: "CAKE"
+        price:
+          type: number
+          example: 2.45
+        volume24h:
+          type: number
+          example: 15000000
+        liquidity:
+          type: number
+          example: 50000000
+        priceChange24h:
+          type: number
+          example: 5.67
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Validation failed
+        message:
+          type: string
+          example: Invalid request parameters
+        details:
+          type: array
+          items:
+            type: object
+
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Validation failed"
+            message: "Risk level must be between 1 and 10"
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Rate limit exceeded
+              message:
+                type: string
+                example: Too many requests, please try again later
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication (optional for development)
+
+security:
+  - ApiKeyAuth: []
