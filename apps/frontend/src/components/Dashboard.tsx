@@ -90,9 +90,7 @@ export default function Dashboard() {
       // Filter out empty token addresses
       const validTokens = tokenInputs.filter((t) => t.trim() !== '');
 
-      if (validTokens.length === 0) {
-        setError('Please add at least one token address or leave empty to auto-discover');
-      }
+      // Empty tokens array is valid - backend will auto-discover trending tokens
 
       const response = await startBot({
         tokens: validTokens,

@@ -23,6 +23,7 @@ import { storeMemory, fetchAllMemories, fetchMemory } from './blockchain/memoryS
 import { initializeTelegramBot, alertBotStatus, alertAIDecision, alertTradeExecution } from './alerts/telegramBot';
 import { TradeMemory } from './agent/learningLoop';
 import { calculateBuySellPressure } from './data/marketFetcher';
+import { BotState } from './bot-state';
 
 // Initialize OpenRouter
 const openrouter = createOpenRouter({
@@ -170,6 +171,19 @@ Sells (24h): ${tokenData.txns24h.sells}
             logger.info(`✅ Trade executed: ${result.txHash}`);
             logger.info(`Gas used: ${result.gasUsed}`);
 
+            // Log to BotState
+            BotState.addTradeLog({
+              id: `${Date.now()}-${tradeTokenAddress.slice(0, 6)}`,
+              timestamp: Date.now(),
+              token: tradeTokenAddress,
+              tokenSymbol: tokenData.symbol,
+              action,
+              amount: amountBNB,
+              price: parseFloat(tokenData.priceUsd),
+              status: 'success',
+              txHash: result.txHash,
+            });
+
             // Store memory on Greenfield
             const memory: TradeMemory = {
               id: '',
@@ -236,10 +250,23 @@ Sells (24h): ${tokenData.txns24h.sells}
 
 /**
  * Main loop - check markets periodically
+ * Now integrated with BotState for frontend control
  */
 async function main() {
-  logger.info('🚀 Starting Immortal AI Trading Bot...');
-  logger.info('📍 Network: BNB Chain ' + (CONFIG.NETWORK === 'mainnet' ? 'MAINNET' : 'TESTNET'));
+  // Check if bot is running via BotState
+  if (!BotState.isRunning()) {
+    logger.info('⏸️  Bot is stopped via frontend - skipping cycle');
+    return;
+  }
+
+  const config = BotState.getConfig();
+  if (!config) {
+    logger.warn('⚠️  No bot configuration found - skipping cycle');
+    return;
+  }
+
+  logger.info('🚀 Starting trading cycle...');
+  logger.info(`📍 Network: ${config.network} | Risk: ${config.riskLevel}/10`);
 
   // Initialize
   initializeProvider();
@@ -252,20 +279,26 @@ async function main() {
     logger.warn('⚠️  Low balance! Get testnet BNB from https://testnet.bnbchain.org/faucet-smart');
   }
 
-  await alertBotStatus('started', `Bot started with ${balance.toFixed(4)} BNB balance`);
-
-  // Get trending tokens or use watchlist
-  let tokensToWatch = CONFIG.DEFAULT_WATCHLIST;
+  // Get tokens from BotState config or auto-discover
+  let tokensToWatch = config.tokens;
 
   if (tokensToWatch.length === 0) {
-    logger.info('📈 Fetching trending tokens...');
+    logger.info('📈 Auto-discovering trending tokens from DexScreener...');
     const trending = await getTrendingTokens(3);
     tokensToWatch = trending.map(t => t.address);
     logger.info(`Found ${tokensToWatch.length} trending tokens`);
+  } else {
+    logger.info(`📋 Monitoring ${tokensToWatch.length} tokens from watchlist`);
   }
 
   // Analyze each token
   for (const tokenAddress of tokensToWatch) {
+    // Check if still running before each token
+    if (!BotState.isRunning()) {
+      logger.info('🛑 Bot stopped during cycle - exiting');
+      break;
+    }
+
     try {
       await invokeAgent(tokenAddress);
 
@@ -277,42 +310,101 @@ async function main() {
   }
 
   logger.info('\n✅ Trading cycle complete');
-  logger.info(`Next run in ${CONFIG.BOT_LOOP_INTERVAL_MS / 1000 / 60} minutes\n`);
+  const nextRunMinutes = (config.interval / 1000 / 60).toFixed(1);
+  logger.info(`Next run in ${nextRunMinutes} minutes\n`);
 }
 
 /**
- * Start bot with interval
+ * Background loop - runs continuously and checks BotState
+ * The bot is controlled via BotState (start/stop from frontend)
  */
-async function startBot() {
-  // Run immediately
-  await main();
+async function backgroundLoop() {
+  logger.info('🔄 Background loop started - waiting for bot to be started via frontend');
 
-  // Then run on interval
-  setInterval(async () => {
-    await main();
-  }, CONFIG.BOT_LOOP_INTERVAL_MS);
+  // Run every minute to check if bot should execute
+  const checkInterval = setInterval(async () => {
+    if (BotState.isRunning()) {
+      const config = BotState.getConfig();
+      const now = Date.now();
+      const lastRun = (global as any).lastBotRun || 0;
+      const intervalMs = config?.interval || parseInt(CONFIG.BOT_LOOP_INTERVAL_MS);
+
+      // Check if it's time to run
+      if (now - lastRun >= intervalMs) {
+        (global as any).lastBotRun = now;
+        await main();
+      }
+    }
+  }, 60000); // Check every minute
+
+  // Store interval for cleanup
+  (global as any).backgroundLoopInterval = checkInterval;
 }
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
   logger.info('\n👋 Shutting down gracefully...');
+
+  // Stop bot if running
+  if (BotState.isRunning()) {
+    BotState.stop();
+  }
+
+  // Clear background loop
+  if ((global as any).backgroundLoopInterval) {
+    clearInterval((global as any).backgroundLoopInterval);
+  }
+
   await alertBotStatus('stopped', 'Bot shutting down');
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   logger.info('\n👋 Shutting down gracefully...');
+
+  // Stop bot if running
+  if (BotState.isRunning()) {
+    BotState.stop();
+  }
+
+  // Clear background loop
+  if ((global as any).backgroundLoopInterval) {
+    clearInterval((global as any).backgroundLoopInterval);
+  }
+
   await alertBotStatus('stopped', 'Bot shutting down');
   process.exit(0);
 });
 
 // Start if run directly
 if (import.meta.main) {
+  logger.info('🌟 Immortal AI Trading Bot - Production Mode');
+  logger.info('📍 Network: BNB Chain ' + (CONFIG.NETWORK === 'mainnet' ? 'MAINNET ⚠️' : 'TESTNET'));
+  logger.info('');
+
+  // Validate critical environment variables
+  const requiredVars = ['WALLET_PRIVATE_KEY', 'OPENROUTER_API_KEY', 'RPC_URL_TESTNET'];
+  const missingVars = requiredVars.filter(v => !process.env[v] || process.env[v]?.startsWith('0x000000'));
+
+  if (missingVars.length > 0) {
+    logger.error(`❌ Missing required environment variables: ${missingVars.join(', ')}`);
+    logger.error('Please configure .env file before starting the bot');
+    process.exit(1);
+  }
+
+  logger.info('✅ Environment variables validated');
+  logger.info('');
+
   // Start API server for frontend
   startAPIServer();
+  logger.info('');
 
-  // Start trading bot
-  startBot().catch((error) => {
+  // Start background loop
+  logger.info('🤖 Bot is ready - use the frontend to start trading');
+  logger.info('🌐 Frontend should connect to: http://localhost:3001');
+  logger.info('');
+
+  backgroundLoop().catch((error) => {
     logger.error(`Fatal error: ${error.message}`);
     process.exit(1);
   });
