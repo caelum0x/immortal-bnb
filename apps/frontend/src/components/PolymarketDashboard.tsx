@@ -15,6 +15,7 @@ import {
   analyzePolymarketMarket,
   getPolymarketHistory,
   getPolymarketBettingStats,
+  getPolymarketLeaderboard,
   PolymarketMarket,
   PolymarketBalance,
   PolymarketPosition,
@@ -23,6 +24,8 @@ import {
   AIMarketAnalysis,
   PolymarketBet,
   BettingStats,
+  Leaderboard,
+  TopTrader,
 } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 
@@ -39,9 +42,11 @@ export default function PolymarketDashboard() {
   const [opportunities, setOpportunities] = useState<CrossPlatformOpportunity[]>([]);
   const [betHistory, setBetHistory] = useState<PolymarketBet[]>([]);
   const [bettingStats, setBettingStats] = useState<BettingStats | null>(null);
+  const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'markets' | 'leaderboard'>('markets');
 
   // Load initial data
   useEffect(() => {
@@ -58,7 +63,7 @@ export default function PolymarketDashboard() {
       setLoading(true);
       setError(null);
 
-      const [marketsData, balanceData, positionsData, ordersData, oppsData, historyData, statsData] = await Promise.all([
+      const [marketsData, balanceData, positionsData, ordersData, oppsData, historyData, statsData, leaderboardData] = await Promise.all([
         getPolymarketMarkets(10),
         getPolymarketBalance(),
         getPolymarketPositions(),
@@ -66,6 +71,7 @@ export default function PolymarketDashboard() {
         getCrossPlatformOpportunities(),
         getPolymarketHistory(20),
         getPolymarketBettingStats(),
+        getPolymarketLeaderboard(),
       ]);
 
       setMarkets(marketsData.map(m => ({ ...m, analyzing: false })));
@@ -75,6 +81,7 @@ export default function PolymarketDashboard() {
       setOpportunities(oppsData);
       setBetHistory(historyData);
       setBettingStats(statsData);
+      setLeaderboard(leaderboardData);
     } catch (err: any) {
       console.error('Failed to load Polymarket data:', err);
       setError(err.message || 'Failed to load data');
@@ -169,6 +176,30 @@ export default function PolymarketDashboard() {
         </button>
       </div>
 
+      {/* Tab Navigation */}
+      <div className="flex space-x-2 border-b border-gray-700">
+        <button
+          onClick={() => setActiveTab('markets')}
+          className={`px-6 py-3 font-semibold transition-all ${
+            activeTab === 'markets'
+              ? 'border-b-2 border-blue-500 text-blue-500'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          📈 Markets
+        </button>
+        <button
+          onClick={() => setActiveTab('leaderboard')}
+          className={`px-6 py-3 font-semibold transition-all ${
+            activeTab === 'leaderboard'
+              ? 'border-b-2 border-blue-500 text-blue-500'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          🏆 Top Traders
+        </button>
+      </div>
+
       {/* Error Display */}
       {error && (
         <div className="bg-red-900/20 border border-red-500 rounded-lg p-4">
@@ -226,6 +257,9 @@ export default function PolymarketDashboard() {
         )}
       </div>
 
+      {/* Markets Tab */}
+      {activeTab === 'markets' && (
+        <>
       {/* Trending Markets with AI Analysis */}
       <div className="card p-6">
         <h3 className="text-xl font-bold mb-4">📈 Trending Markets</h3>
@@ -475,6 +509,145 @@ export default function PolymarketDashboard() {
             All bets are automatically saved to BNB Greenfield for immortal storage
           </p>
         </div>
+      )}
+        </>
+      )}
+
+      {/* Leaderboard Tab */}
+      {activeTab === 'leaderboard' && leaderboard && (
+        <>
+          {/* Top by Profit */}
+          <div className="card p-6">
+            <h3 className="text-xl font-bold mb-4">💰 Top Traders by Profit</h3>
+            <div className="space-y-2">
+              {leaderboard.topByProfit.slice(0, 10).map((trader) => (
+                <div
+                  key={trader.address}
+                  className="bg-gray-800/50 rounded-lg p-4 hover:bg-gray-800/70 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="text-2xl font-bold text-gray-400">
+                        #{trader.rank}
+                      </div>
+                      <div>
+                        <p className="font-mono text-sm text-gray-300">
+                          {trader.address.slice(0, 6)}...{trader.address.slice(-4)}
+                        </p>
+                        <div className="flex gap-3 text-xs text-gray-400 mt-1">
+                          <span>{trader.totalTrades} trades</span>
+                          <span className="text-green-400">{trader.winRate.toFixed(1)}% win rate</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-xl font-bold ${trader.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {trader.totalProfit >= 0 ? '+' : ''}${trader.totalProfit.toLocaleString()}
+                      </p>
+                      <p className="text-sm text-gray-400">
+                        {trader.totalProfitPercent.toFixed(1)}% ROI
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        ${trader.totalVolume.toLocaleString()} volume
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Grid of Win Rate and Volume */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Top by Win Rate */}
+            <div className="card p-6">
+              <h3 className="text-xl font-bold mb-4">🎯 Top by Win Rate</h3>
+              <div className="space-y-2">
+                {leaderboard.topByWinRate.slice(0, 5).map((trader) => (
+                  <div
+                    key={trader.address}
+                    className="bg-gray-800/50 rounded-lg p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-mono text-xs">
+                          {trader.address.slice(0, 6)}...{trader.address.slice(-4)}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {trader.totalTrades} trades
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-green-400">
+                          {trader.winRate.toFixed(1)}%
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {trader.winningTrades}W / {trader.losingTrades}L
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Top by Volume */}
+            <div className="card p-6">
+              <h3 className="text-xl font-bold mb-4">📊 Top by Volume</h3>
+              <div className="space-y-2">
+                {leaderboard.topByVolume.slice(0, 5).map((trader) => (
+                  <div
+                    key={trader.address}
+                    className="bg-gray-800/50 rounded-lg p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-mono text-xs">
+                          {trader.address.slice(0, 6)}...{trader.address.slice(-4)}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {trader.totalTrades} trades
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-blue-400">
+                          ${trader.totalVolume.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {trader.openPositions} open
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Learn from Top Traders Info */}
+          <div className="card p-6 bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-500/30">
+            <div className="flex items-start gap-4">
+              <div className="text-4xl">🎓</div>
+              <div>
+                <h3 className="text-lg font-bold mb-2">Learn from the Best</h3>
+                <p className="text-sm text-gray-300 mb-3">
+                  These top traders have proven track records on Polymarket. Our AI can analyze their strategies and positions to improve predictions.
+                </p>
+                <div className="flex gap-3 text-xs">
+                  <span className="px-3 py-1 bg-green-900/30 text-green-400 rounded">
+                    ✓ High Win Rates
+                  </span>
+                  <span className="px-3 py-1 bg-blue-900/30 text-blue-400 rounded">
+                    ✓ Proven Profits
+                  </span>
+                  <span className="px-3 py-1 bg-purple-900/30 text-purple-400 rounded">
+                    ✓ Active Traders
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

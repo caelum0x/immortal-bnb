@@ -530,3 +530,115 @@ export async function getPolymarketBettingStats(): Promise<BettingStats> {
     throw new Error(error.response?.data?.error || 'Failed to fetch betting stats');
   }
 }
+
+// =============================================================================
+// POLYMARKET LEADERBOARD & TOP TRADERS API
+// =============================================================================
+
+export interface TopTrader {
+  address: string;
+  displayName?: string;
+  totalVolume: number;
+  totalProfit: number;
+  totalProfitPercent: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  activeMarkets: number;
+  lastTradeTimestamp: number;
+  biggestWin?: {
+    marketQuestion: string;
+    profit: number;
+    timestamp: number;
+  };
+  openPositions: number;
+  rank?: number;
+  category?: 'PROFIT' | 'WIN_RATE' | 'VOLUME' | 'RECENT';
+}
+
+export interface Leaderboard {
+  topByProfit: TopTrader[];
+  topByWinRate: TopTrader[];
+  topByVolume: TopTrader[];
+  timestamp: number;
+}
+
+export interface TraderStrategy {
+  address: string;
+  preferredMarkets: string[];
+  preferredOutcomes: { [key: string]: number };
+  avgPositionSize: number;
+  riskProfile: 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE';
+  activeStrategies: string[];
+}
+
+/**
+ * Get complete Polymarket leaderboard
+ */
+export async function getPolymarketLeaderboard(): Promise<Leaderboard> {
+  try {
+    const response = await apiClient.get<Leaderboard>('/api/polymarket/leaderboard');
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch leaderboard');
+  }
+}
+
+/**
+ * Get top traders by profit
+ */
+export async function getTopTradersByProfit(limit: number = 20): Promise<TopTrader[]> {
+  try {
+    const response = await apiClient.get<{ traders: TopTrader[]; count: number; category: string; timestamp: number }>(
+      '/api/polymarket/top-traders/profit',
+      { params: { limit } }
+    );
+    return response.data.traders || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch top traders');
+  }
+}
+
+/**
+ * Get top traders by win rate
+ */
+export async function getTopTradersByWinRate(limit: number = 20, minTrades: number = 10): Promise<TopTrader[]> {
+  try {
+    const response = await apiClient.get<{ traders: TopTrader[]; count: number; category: string; timestamp: number }>(
+      '/api/polymarket/top-traders/winrate',
+      { params: { limit, minTrades } }
+    );
+    return response.data.traders || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch top traders');
+  }
+}
+
+/**
+ * Get trader details by address
+ */
+export async function getTraderDetails(address: string): Promise<TopTrader> {
+  try {
+    const response = await apiClient.get<{ trader: TopTrader; timestamp: number }>(
+      `/api/polymarket/trader/${address}`
+    );
+    return response.data.trader;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch trader details');
+  }
+}
+
+/**
+ * Analyze trader strategy
+ */
+export async function analyzeTraderStrategy(address: string): Promise<TraderStrategy> {
+  try {
+    const response = await apiClient.get<{ strategy: TraderStrategy; timestamp: number }>(
+      `/api/polymarket/trader/${address}/strategy`
+    );
+    return response.data.strategy;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to analyze trader strategy');
+  }
+}

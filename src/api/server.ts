@@ -899,5 +899,135 @@ app.get('/api/polymarket/stats', async (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// POLYMARKET LEADERBOARD & TOP TRADERS ENDPOINTS
+// =============================================================================
+
+// Get complete leaderboard (profit, win rate, volume)
+app.get('/api/polymarket/leaderboard', async (req: Request, res: Response) => {
+  try {
+    const { getLeaderboard } = await import('../polymarket/polymarketLeaderboard');
+    const leaderboard = await getLeaderboard();
+
+    res.json({
+      ...leaderboard,
+    });
+  } catch (error) {
+    logger.error('Error fetching leaderboard:', error);
+    res.status(500).json({
+      error: 'Failed to fetch leaderboard',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get top traders by profit
+app.get('/api/polymarket/top-traders/profit', async (req: Request, res: Response) => {
+  try {
+    const { fetchTopTradersByProfit } = await import('../polymarket/polymarketLeaderboard');
+    const limit = parseInt(req.query.limit as string) || 50;
+
+    const traders = await fetchTopTradersByProfit(limit);
+
+    res.json({
+      traders,
+      count: traders.length,
+      category: 'PROFIT',
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching top traders by profit:', error);
+    res.status(500).json({
+      error: 'Failed to fetch top traders',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get top traders by win rate
+app.get('/api/polymarket/top-traders/winrate', async (req: Request, res: Response) => {
+  try {
+    const { fetchTopTradersByWinRate } = await import('../polymarket/polymarketLeaderboard');
+    const limit = parseInt(req.query.limit as string) || 50;
+    const minTrades = parseInt(req.query.minTrades as string) || 10;
+
+    const traders = await fetchTopTradersByWinRate(limit, minTrades);
+
+    res.json({
+      traders,
+      count: traders.length,
+      category: 'WIN_RATE',
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching top traders by win rate:', error);
+    res.status(500).json({
+      error: 'Failed to fetch top traders',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get trader details by address
+app.get('/api/polymarket/trader/:address', async (req: Request, res: Response) => {
+  try {
+    const { address } = req.params;
+
+    if (!address) {
+      return res.status(400).json({
+        error: 'Trader address is required',
+      });
+    }
+
+    const { getTraderDetails } = await import('../polymarket/polymarketLeaderboard');
+    const trader = await getTraderDetails(address);
+
+    if (!trader) {
+      return res.status(404).json({
+        error: 'Trader not found',
+        address,
+      });
+    }
+
+    res.json({
+      trader,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching trader details:', error);
+    res.status(500).json({
+      error: 'Failed to fetch trader details',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Analyze trader strategy
+app.get('/api/polymarket/trader/:address/strategy', async (req: Request, res: Response) => {
+  try {
+    const { address } = req.params;
+
+    if (!address) {
+      return res.status(400).json({
+        error: 'Trader address is required',
+      });
+    }
+
+    const { analyzeTraderStrategy } = await import('../polymarket/polymarketLeaderboard');
+    const strategy = await analyzeTraderStrategy(address);
+
+    res.json({
+      strategy,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error analyzing trader strategy:', error);
+    res.status(500).json({
+      error: 'Failed to analyze trader strategy',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
 // END POLYMARKET ENDPOINTS
 // =============================================================================
