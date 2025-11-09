@@ -3,8 +3,9 @@
  * Validates all incoming API requests using express-validator
  */
 
-import { body, query, validationResult, ValidationChain } from 'express-validator';
-import { Request, Response, NextFunction } from 'express';
+import { body, query, validationResult } from 'express-validator';
+import type { ValidationChain } from 'express-validator';
+import type { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 
 /**

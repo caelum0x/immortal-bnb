@@ -3,7 +3,7 @@
  * Provides API key authentication for securing backend endpoints
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 import { randomBytes } from 'crypto';
 
@@ -156,14 +156,18 @@ export function restrictToIPs(allowedIPs: string[]) {
  * Combine multiple auth middlewares
  * Example: combine API key + IP restriction
  */
-export function combineAuth(...middlewares: Function[]) {
+type AuthMiddleware = (req: Request, res: Response, next: NextFunction) => void;
+
+export function combineAuth(...middlewares: AuthMiddleware[]) {
   return function (req: Request, res: Response, next: NextFunction): void {
     let index = 0;
 
     const runNext = (): void => {
       if (index < middlewares.length) {
         const middleware = middlewares[index++];
-        middleware(req, res, runNext);
+        if (middleware) {
+          middleware(req, res, runNext);
+        }
       } else {
         next();
       }

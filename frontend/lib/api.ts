@@ -235,3 +235,110 @@ export const api = {
 };
 
 export default apiClient;
+
+// Type exports for components
+export interface TradeMemory {
+  id: string;
+  timestamp: number;
+  tokenSymbol: string;
+  tokenAddress: string;
+  action: 'buy' | 'sell';
+  amount: number;
+  entryPrice: number;
+  exitPrice?: number;
+  outcome: 'profit' | 'loss' | 'pending';
+  aiReasoning: string;
+  marketConditions: {
+    volume24h: number;
+    liquidity: number;
+    priceChange24h: number;
+    marketTrend: 'bullish' | 'bearish' | 'sideways';
+    buySellPressure: number;
+  };
+  strategy: string;
+  profitLoss?: number;
+  success?: boolean;
+}
+
+export interface TradingStats {
+  totalTrades: number;
+  successfulTrades: number;
+  failedTrades: number;
+  totalProfit: number;
+  totalLoss: number;
+  winRate: number;
+  avgProfit: number;
+  avgLoss: number;
+  bestTrade: number;
+  worstTrade: number;
+  totalVolume: number;
+  wins: number;
+  losses: number;
+  totalPL: number;
+  avgPL: number;
+}
+
+export interface TokenInfo {
+  address: string;
+  symbol: string;
+  name: string;
+  priceUsd: number;
+  priceChange24h: number;
+  volume24h: number;
+  liquidity: number;
+  marketCap?: number;
+  score?: number;
+  trending?: boolean;
+}
+
+// Export convenience functions
+export async function getMemories(limit = 50): Promise<TradeMemory[]> {
+  const response = await apiClient.getMemories(limit);
+  // Transform backend response to match TradeMemory interface
+  return response.memories.map(m => ({
+    id: m.id,
+    timestamp: m.timestamp,
+    tokenSymbol: m.tokenSymbol || 'UNKNOWN',
+    tokenAddress: '0x0000000000000000000000000000000000000000',
+    action: (m.action.toLowerCase() === 'buy' || m.action.toLowerCase() === 'sell' ? m.action.toLowerCase() : 'buy') as 'buy' | 'sell',
+    amount: 0.1,
+    entryPrice: 0,
+    outcome: (m.outcome === 'profit' || m.outcome === 'loss' || m.outcome === 'pending' ? m.outcome : 'pending') as 'profit' | 'loss' | 'pending',
+    aiReasoning: 'AI analysis in progress',
+    marketConditions: {
+      volume24h: 0,
+      liquidity: 0,
+      priceChange24h: 0,
+      marketTrend: 'sideways' as const,
+      buySellPressure: 1.0,
+    },
+    strategy: 'Dynamic AI Trading',
+    profitLoss: m.profitLoss,
+  }));
+}
+
+export async function getTradingStats(): Promise<TradingStats> {
+  const response = await apiClient.getDashboardStats();
+  return {
+    totalTrades: response.totalTrades,
+    successfulTrades: Math.floor(response.totalTrades * (response.successRate / 100)),
+    failedTrades: Math.floor(response.totalTrades * (1 - response.successRate / 100)),
+    totalProfit: parseFloat(response.totalProfit) || 0,
+    totalLoss: 0,
+    winRate: response.successRate,
+    avgProfit: 0,
+    avgLoss: 0,
+    bestTrade: 0,
+    worstTrade: 0,
+    totalVolume: 0,
+    wins: Math.floor(response.totalTrades * (response.successRate / 100)),
+    losses: Math.floor(response.totalTrades * (1 - response.successRate / 100)),
+    totalPL: parseFloat(response.totalProfit) || 0,
+    avgPL: 0,
+  };
+}
+
+export async function discoverTokens(): Promise<TokenInfo[]> {
+  // Mock implementation for now - needs backend endpoint
+  return [];
+}
