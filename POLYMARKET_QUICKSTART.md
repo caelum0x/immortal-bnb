@@ -223,11 +223,11 @@ POLYMARKET_CHAIN_ID=137  # 137 = Polygon Mainnet, 80001 = Mumbai Testnet
 # Polygon RPC
 POLYGON_RPC=https://polygon-rpc.com
 
-# Your wallet (already configured)
-WALLET_PRIVATE_KEY=0xd17d8d4df5d3ef0a0bf0d254398e757e1328f2a5d05d9a75054ec363375e80fe
+# Your wallet (generate your own!)
+WALLET_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE
 
-# AI Analysis (already configured)
-OPENROUTER_API_KEY=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
+# AI Analysis (get your own from https://openrouter.ai/)
+OPENROUTER_API_KEY=sk-or-v1-YOUR_API_KEY_HERE
 ```
 
 ---
