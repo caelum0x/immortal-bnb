@@ -506,3 +506,205 @@ app.post('/api/ai/load-memories', async (req: Request, res: Response) => {
 // =============================================================================
 // END IMMORTAL AI ENDPOINTS
 // =============================================================================
+
+// =============================================================================
+// POLYMARKET PREDICTION MARKETS ENDPOINTS
+// =============================================================================
+
+// Get trending Polymarket markets
+app.get('/api/polymarket/markets', async (req: Request, res: Response) => {
+  try {
+    const { PolymarketService } = await import('../polymarket/polymarketClient');
+    const polymarketService = PolymarketService.getInstance();
+
+    const limit = parseInt(req.query.limit as string) || 10;
+    const markets = await polymarketService.getActiveMarkets(limit);
+
+    res.json({
+      markets,
+      count: markets.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching Polymarket markets:', error);
+    res.status(500).json({
+      error: 'Failed to fetch markets',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get AI analysis for a specific Polymarket market
+app.post('/api/polymarket/analyze', async (req: Request, res: Response) => {
+  try {
+    const { marketId, question } = req.body;
+
+    if (!marketId) {
+      return res.status(400).json({
+        error: 'Market ID is required',
+      });
+    }
+
+    const { PolymarketService } = await import('../polymarket/polymarketClient');
+    const { AIMarketAnalyzer } = await import('../polymarket/aiPredictionAnalyzer');
+
+    const polymarketService = PolymarketService.getInstance();
+    const aiAnalyzer = new AIMarketAnalyzer();
+
+    // Get market data
+    const markets = await polymarketService.getActiveMarkets(100);
+    const market = markets.find(m => m.id === marketId);
+
+    if (!market) {
+      return res.status(404).json({
+        error: 'Market not found',
+        marketId,
+      });
+    }
+
+    // Get AI analysis
+    const analysis = await aiAnalyzer.analyzeMarket({
+      id: market.id,
+      question: market.question || question,
+      description: market.description || '',
+      endDate: market.endDate || new Date(Date.now() + 86400000).toISOString(),
+      volume: parseFloat(market.volume || '0'),
+      liquidity: parseFloat(market.liquidity || '0'),
+    });
+
+    res.json({
+      market,
+      analysis,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error analyzing Polymarket market:', error);
+    res.status(500).json({
+      error: 'Failed to analyze market',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get Polymarket wallet balance (MATIC + USDC)
+app.get('/api/polymarket/balance', async (req: Request, res: Response) => {
+  try {
+    const { PolymarketService } = await import('../polymarket/polymarketClient');
+    const polymarketService = PolymarketService.getInstance();
+
+    const balances = await polymarketService.getBalances();
+
+    res.json({
+      balances,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching Polymarket balance:', error);
+    res.status(500).json({
+      error: 'Failed to fetch balance',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get current Polymarket positions
+app.get('/api/polymarket/positions', async (req: Request, res: Response) => {
+  try {
+    const { PolymarketService } = await import('../polymarket/polymarketClient');
+    const polymarketService = PolymarketService.getInstance();
+
+    const positions = await polymarketService.getPositions();
+
+    res.json({
+      positions,
+      count: positions.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching Polymarket positions:', error);
+    res.status(500).json({
+      error: 'Failed to fetch positions',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get open Polymarket orders
+app.get('/api/polymarket/orders', async (req: Request, res: Response) => {
+  try {
+    const { PolymarketService } = await import('../polymarket/polymarketClient');
+    const polymarketService = PolymarketService.getInstance();
+
+    const orders = await polymarketService.getOpenOrders();
+
+    res.json({
+      orders,
+      count: orders.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching Polymarket orders:', error);
+    res.status(500).json({
+      error: 'Failed to fetch orders',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get cross-platform trading opportunities (DEX + Polymarket)
+app.get('/api/polymarket/opportunities', async (req: Request, res: Response) => {
+  try {
+    const { CrossPlatformStrategy } = await import('../polymarket/crossPlatformStrategy');
+    const strategy = new CrossPlatformStrategy();
+
+    const opportunities = await strategy.scanOpportunities();
+
+    res.json({
+      opportunities,
+      count: opportunities.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching cross-platform opportunities:', error);
+    res.status(500).json({
+      error: 'Failed to fetch opportunities',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get orderbook for a specific market
+app.get('/api/polymarket/orderbook/:marketId', async (req: Request, res: Response) => {
+  try {
+    const { marketId } = req.params;
+
+    if (!marketId) {
+      return res.status(400).json({
+        error: 'Market ID is required',
+      });
+    }
+
+    const { PolymarketService } = await import('../polymarket/polymarketClient');
+    const polymarketService = PolymarketService.getInstance();
+
+    const orderbook = await polymarketService.getOrderBook(marketId);
+    const midPrice = await polymarketService.getMidPrice(marketId);
+
+    res.json({
+      marketId,
+      orderbook,
+      midPrice,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching orderbook:', error);
+    res.status(500).json({
+      error: 'Failed to fetch orderbook',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
+// END POLYMARKET ENDPOINTS
+// =============================================================================

@@ -12,8 +12,9 @@ import MemoriesView from '@/components/MemoriesView';
 import TokenDiscovery from '@/components/TokenDiscovery';
 import StakingUI from '@/components/StakingUI';
 import TradingStats from '@/components/TradingStats';
+import PolymarketDashboard from '@/components/PolymarketDashboard';
 
-type Tab = 'dashboard' | 'memories' | 'tokens' | 'staking';
+type Tab = 'dashboard' | 'memories' | 'tokens' | 'staking' | 'polymarket';
 
 export default function Home() {
   const { isConnected } = useAccount();
@@ -21,6 +22,7 @@ export default function Home() {
 
   const tabs = [
     { id: 'dashboard' as Tab, label: '🤖 Dashboard', icon: '📊' },
+    { id: 'polymarket' as Tab, label: '🔮 Polymarket', icon: '🎯' },
     { id: 'memories' as Tab, label: '🧠 Memories', icon: '💾' },
     { id: 'tokens' as Tab, label: '🔍 Discover', icon: '🔎' },
     { id: 'staking' as Tab, label: '💰 Staking', icon: '🏦' },
@@ -93,6 +95,7 @@ export default function Home() {
 
             {/* Tab Content */}
             {activeTab === 'dashboard' && <Dashboard />}
+            {activeTab === 'polymarket' && <PolymarketDashboard />}
             {activeTab === 'memories' && <MemoriesView />}
             {activeTab === 'tokens' && <TokenDiscovery />}
             {activeTab === 'staking' && <StakingUI />}

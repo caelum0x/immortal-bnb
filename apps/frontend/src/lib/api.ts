@@ -219,3 +219,172 @@ export async function isBackendAvailable(): Promise<boolean> {
     return false;
   }
 }
+
+// =============================================================================
+// POLYMARKET PREDICTION MARKETS API
+// =============================================================================
+
+export interface PolymarketMarket {
+  id: string;
+  question: string;
+  description?: string;
+  endDate?: string;
+  volume?: string;
+  liquidity?: string;
+  active?: boolean;
+  condition_id?: string;
+}
+
+export interface AIMarketAnalysis {
+  recommendation: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+  confidence: number;
+  suggestedPrice: number;
+  suggestedSize: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  reasoning: string;
+  expectedReturn?: number;
+  timeframe?: string;
+}
+
+export interface PolymarketBalance {
+  matic: number;
+  usdc: number;
+}
+
+export interface PolymarketPosition {
+  marketId: string;
+  marketQuestion: string;
+  outcome: string;
+  size: number;
+  avgPrice: number;
+  currentPrice?: number;
+  pnl?: number;
+}
+
+export interface PolymarketOrder {
+  id: string;
+  marketId: string;
+  side: 'BUY' | 'SELL';
+  price: number;
+  size: number;
+  filled: number;
+  status: string;
+}
+
+export interface CrossPlatformOpportunity {
+  type: 'CORRELATION' | 'ARBITRAGE' | 'HEDGING' | 'DIRECTIONAL';
+  description: string;
+  expectedProfit: number;
+  confidence: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  markets?: PolymarketMarket[];
+  tokens?: string[];
+  action: string;
+}
+
+/**
+ * Get trending Polymarket markets
+ */
+export async function getPolymarketMarkets(limit: number = 10): Promise<PolymarketMarket[]> {
+  try {
+    const response = await apiClient.get<{ markets: PolymarketMarket[]; count: number; timestamp: number }>(
+      '/api/polymarket/markets',
+      { params: { limit } }
+    );
+    return response.data.markets || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch Polymarket markets');
+  }
+}
+
+/**
+ * Get AI analysis for a Polymarket market
+ */
+export async function analyzePolymarketMarket(marketId: string, question?: string): Promise<{
+  market: PolymarketMarket;
+  analysis: AIMarketAnalysis;
+  timestamp: number;
+}> {
+  try {
+    const response = await apiClient.post('/api/polymarket/analyze', {
+      marketId,
+      question,
+    });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to analyze market');
+  }
+}
+
+/**
+ * Get Polymarket wallet balance
+ */
+export async function getPolymarketBalance(): Promise<PolymarketBalance> {
+  try {
+    const response = await apiClient.get<{ balances: PolymarketBalance; timestamp: number }>(
+      '/api/polymarket/balance'
+    );
+    return response.data.balances;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch Polymarket balance');
+  }
+}
+
+/**
+ * Get current Polymarket positions
+ */
+export async function getPolymarketPositions(): Promise<PolymarketPosition[]> {
+  try {
+    const response = await apiClient.get<{ positions: PolymarketPosition[]; count: number; timestamp: number }>(
+      '/api/polymarket/positions'
+    );
+    return response.data.positions || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch positions');
+  }
+}
+
+/**
+ * Get open Polymarket orders
+ */
+export async function getPolymarketOrders(): Promise<PolymarketOrder[]> {
+  try {
+    const response = await apiClient.get<{ orders: PolymarketOrder[]; count: number; timestamp: number }>(
+      '/api/polymarket/orders'
+    );
+    return response.data.orders || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch orders');
+  }
+}
+
+/**
+ * Get cross-platform trading opportunities
+ */
+export async function getCrossPlatformOpportunities(): Promise<CrossPlatformOpportunity[]> {
+  try {
+    const response = await apiClient.get<{ opportunities: CrossPlatformOpportunity[]; count: number; timestamp: number }>(
+      '/api/polymarket/opportunities'
+    );
+    return response.data.opportunities || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch opportunities');
+  }
+}
+
+/**
+ * Get orderbook for a specific market
+ */
+export async function getPolymarketOrderbook(marketId: string): Promise<{
+  marketId: string;
+  orderbook: any;
+  midPrice: number | null;
+  timestamp: number;
+}> {
+  try {
+    const response = await apiClient.get(`/api/polymarket/orderbook/${marketId}`);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch orderbook');
+  }
+}
