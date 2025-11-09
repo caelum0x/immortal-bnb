@@ -237,88 +237,126 @@ export async function fetchTopTradersByWinRate(limit: number = 50, minTrades: nu
 }
 
 /**
- * Fallback: Fetch top traders by analyzing market data
+ * Fallback: Fetch top traders by analyzing market data using real CLOB methods
  */
 async function fetchTopTradersFromMarkets(limit: number = 50): Promise<TopTrader[]> {
   try {
-    logger.info('🔍 Analyzing market data to find top traders...');
+    logger.info('🔍 Analyzing market data to find top traders using CLOB client...');
 
     const polymarketService = PolymarketService.getInstance();
 
-    // Get active markets
-    const markets = await polymarketService.getActiveMarkets(100);
+    // Get all markets using simplified markets for efficiency
+    let markets;
+    try {
+      markets = await polymarketService.getActiveMarkets(100);
+      logger.info(`Found ${markets.length} active markets`);
+    } catch (error) {
+      logger.warn('Failed to get markets, using empty list');
+      markets = [];
+    }
 
-    // Track trader statistics
+    // Track trader statistics from orderbooks and trades
     const traderStats = new Map<string, {
       volume: number;
       trades: number;
       markets: Set<string>;
+      recentTrades: number;
+      avgTradeSize: number;
     }>();
 
-    // Analyze each market's orderbook
-    for (const market of markets) {
+    // Analyze top markets (most liquid ones likely have best traders)
+    const topMarkets = markets
+      .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+      .slice(0, 20); // Top 20 markets by volume
+
+    logger.info(`Analyzing top ${topMarkets.length} markets for trader activity...`);
+
+    // Analyze each market's orderbook and recent trades
+    for (const market of topMarkets) {
       try {
-        const orderbook = await polymarketService.getOrderBook(market.condition_id || market.id);
+        const marketId = market.condition_id || market.id;
 
-        if (!orderbook) continue;
+        // Get orderbook to find active traders
+        const orderbook = await polymarketService.getOrderBook(marketId);
 
-        // Analyze bids
-        if (orderbook.bids) {
-          for (const bid of orderbook.bids) {
-            const trader = bid.maker || 'unknown';
-            const size = parseFloat(bid.size || '0');
+        if (orderbook) {
+          // Analyze bids
+          if (orderbook.bids) {
+            for (const bid of orderbook.bids) {
+              const trader = bid.maker || bid.owner || 'unknown';
+              const size = parseFloat(bid.size || '0');
+              const price = parseFloat(bid.price || '0');
+              const volume = size * price; // USDC volume
 
-            if (!traderStats.has(trader)) {
-              traderStats.set(trader, {
-                volume: 0,
-                trades: 0,
-                markets: new Set(),
-              });
+              if (trader !== 'unknown' && volume > 0) {
+                if (!traderStats.has(trader)) {
+                  traderStats.set(trader, {
+                    volume: 0,
+                    trades: 0,
+                    markets: new Set(),
+                    recentTrades: 0,
+                    avgTradeSize: 0,
+                  });
+                }
+
+                const stats = traderStats.get(trader)!;
+                stats.volume += volume;
+                stats.trades += 1;
+                stats.markets.add(market.id);
+                stats.avgTradeSize = stats.volume / stats.trades;
+              }
             }
-
-            const stats = traderStats.get(trader)!;
-            stats.volume += size;
-            stats.trades += 1;
-            stats.markets.add(market.id);
           }
-        }
 
-        // Analyze asks
-        if (orderbook.asks) {
-          for (const ask of orderbook.asks) {
-            const trader = ask.maker || 'unknown';
-            const size = parseFloat(ask.size || '0');
+          // Analyze asks
+          if (orderbook.asks) {
+            for (const ask of orderbook.asks) {
+              const trader = ask.maker || ask.owner || 'unknown';
+              const size = parseFloat(ask.size || '0');
+              const price = parseFloat(ask.price || '0');
+              const volume = size * price; // USDC volume
 
-            if (!traderStats.has(trader)) {
-              traderStats.set(trader, {
-                volume: 0,
-                trades: 0,
-                markets: new Set(),
-              });
+              if (trader !== 'unknown' && volume > 0) {
+                if (!traderStats.has(trader)) {
+                  traderStats.set(trader, {
+                    volume: 0,
+                    trades: 0,
+                    markets: new Set(),
+                    recentTrades: 0,
+                    avgTradeSize: 0,
+                  });
+                }
+
+                const stats = traderStats.get(trader)!;
+                stats.volume += volume;
+                stats.trades += 1;
+                stats.markets.add(market.id);
+                stats.avgTradeSize = stats.volume / stats.trades;
+              }
             }
-
-            const stats = traderStats.get(trader)!;
-            stats.volume += size;
-            stats.trades += 1;
-            stats.markets.add(market.id);
           }
         }
 
         // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 150));
       } catch (error) {
         // Skip this market on error
+        logger.debug(`Skipping market ${market.id}: ${error}`);
         continue;
       }
     }
 
     // Convert to TopTrader array and sort by volume
     const traders: TopTrader[] = Array.from(traderStats.entries())
-      .filter(([address]) => address !== 'unknown')
+      .filter(([address, stats]) =>
+        address !== 'unknown' &&
+        stats.volume >= 10 && // Minimum $10 volume
+        stats.trades >= 2      // At least 2 orders
+      )
       .map(([address, stats]) => ({
         address,
         totalVolume: stats.volume,
-        totalProfit: 0, // Unknown from orderbook data
+        totalProfit: 0, // Unknown from orderbook data alone
         totalProfitPercent: 0,
         totalTrades: stats.trades,
         winningTrades: 0,
@@ -326,7 +364,7 @@ async function fetchTopTradersFromMarkets(limit: number = 50): Promise<TopTrader
         winRate: 0,
         activeMarkets: stats.markets.size,
         lastTradeTimestamp: Date.now(),
-        openPositions: stats.trades, // Approximate
+        openPositions: stats.trades, // Approximate from open orders
         category: 'VOLUME' as const,
       }))
       .sort((a, b) => b.totalVolume - a.totalVolume)
@@ -336,7 +374,10 @@ async function fetchTopTradersFromMarkets(limit: number = 50): Promise<TopTrader
         rank: index + 1,
       }));
 
-    logger.info(`📊 Found ${traders.length} active traders from market analysis`);
+    logger.info(`📊 Found ${traders.length} active traders from orderbook analysis`);
+    logger.info(`   Total unique traders found: ${traderStats.size}`);
+    logger.info(`   Filtered to ${traders.length} with significant activity`);
+
     return traders;
   } catch (error) {
     logger.error('Failed to fetch traders from markets:', error);
