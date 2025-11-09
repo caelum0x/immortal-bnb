@@ -511,6 +511,19 @@ app.post('/api/ai/load-memories', async (req: Request, res: Response) => {
 // POLYMARKET PREDICTION MARKETS ENDPOINTS
 // =============================================================================
 
+// Initialize Polymarket Greenfield storage on server start
+import { initializePolymarketStorage } from '../polymarket/polymarketStorage';
+
+// Initialize storage when server starts
+setTimeout(async () => {
+  try {
+    await initializePolymarketStorage();
+    logger.info('🔮 Polymarket Greenfield storage ready');
+  } catch (error) {
+    logger.warn('Polymarket storage not available:', error);
+  }
+}, 2000);
+
 // Get trending Polymarket markets
 app.get('/api/polymarket/markets', async (req: Request, res: Response) => {
   try {
@@ -700,6 +713,186 @@ app.get('/api/polymarket/orderbook/:marketId', async (req: Request, res: Respons
     logger.error('Error fetching orderbook:', error);
     res.status(500).json({
       error: 'Failed to fetch orderbook',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
+// POLYMARKET GREENFIELD STORAGE ENDPOINTS
+// =============================================================================
+
+// Get all stored bets from Greenfield
+app.get('/api/polymarket/history', async (req: Request, res: Response) => {
+  try {
+    const { fetchAllBets, fetchBet } = await import('../polymarket/polymarketStorage');
+
+    const limit = parseInt(req.query.limit as string) || 50;
+    const betIds = await fetchAllBets();
+
+    // Fetch recent bets
+    const recentIds = betIds.slice(-limit);
+    const bets = await Promise.all(
+      recentIds.map(id => fetchBet(id))
+    );
+
+    const validBets = bets.filter(b => b !== null);
+
+    res.json({
+      bets: validBets,
+      total: betIds.length,
+      returned: validBets.length,
+    });
+  } catch (error) {
+    logger.error('Error fetching bet history:', error);
+    res.status(500).json({
+      error: 'Failed to fetch bet history',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get a specific bet by ID from Greenfield
+app.get('/api/polymarket/history/:betId', async (req: Request, res: Response) => {
+  try {
+    const { betId } = req.params;
+
+    if (!betId) {
+      return res.status(400).json({
+        error: 'Bet ID is required',
+      });
+    }
+
+    const { fetchBet } = await import('../polymarket/polymarketStorage');
+    const bet = await fetchBet(betId);
+
+    if (!bet) {
+      return res.status(404).json({
+        error: 'Bet not found',
+        betId,
+      });
+    }
+
+    res.json(bet);
+  } catch (error) {
+    logger.error('Error fetching bet:', error);
+    res.status(500).json({
+      error: 'Failed to fetch bet',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Store a new bet to Greenfield
+app.post('/api/polymarket/bet', async (req: Request, res: Response) => {
+  try {
+    const betData = req.body;
+
+    if (!betData.marketId || !betData.marketQuestion) {
+      return res.status(400).json({
+        error: 'Market ID and question are required',
+      });
+    }
+
+    const { storeBet } = await import('../polymarket/polymarketStorage');
+    const betId = await storeBet(betData);
+
+    res.json({
+      betId,
+      message: 'Bet stored on Greenfield successfully',
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error storing bet:', error);
+    res.status(500).json({
+      error: 'Failed to store bet',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Update an existing bet on Greenfield
+app.put('/api/polymarket/bet/:betId', async (req: Request, res: Response) => {
+  try {
+    const { betId } = req.params;
+    const updates = req.body;
+
+    if (!betId) {
+      return res.status(400).json({
+        error: 'Bet ID is required',
+      });
+    }
+
+    const { updateBet } = await import('../polymarket/polymarketStorage');
+    const success = await updateBet(betId, updates);
+
+    if (!success) {
+      return res.status(404).json({
+        error: 'Bet not found or update failed',
+        betId,
+      });
+    }
+
+    res.json({
+      betId,
+      message: 'Bet updated successfully',
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error updating bet:', error);
+    res.status(500).json({
+      error: 'Failed to update bet',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Query bets with filters
+app.get('/api/polymarket/query', async (req: Request, res: Response) => {
+  try {
+    const { queryBets } = await import('../polymarket/polymarketStorage');
+
+    const filters: any = {};
+
+    if (req.query.marketId) filters.marketId = req.query.marketId as string;
+    if (req.query.status) filters.status = req.query.status;
+    if (req.query.outcome_result) filters.outcome_result = req.query.outcome_result;
+    if (req.query.minProfitLoss) filters.minProfitLoss = parseFloat(req.query.minProfitLoss as string);
+    if (req.query.fromTimestamp) filters.fromTimestamp = parseInt(req.query.fromTimestamp as string);
+    if (req.query.toTimestamp) filters.toTimestamp = parseInt(req.query.toTimestamp as string);
+    if (req.query.limit) filters.limit = parseInt(req.query.limit as string);
+
+    const bets = await queryBets(filters);
+
+    res.json({
+      bets,
+      count: bets.length,
+      filters,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error querying bets:', error);
+    res.status(500).json({
+      error: 'Failed to query bets',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get betting statistics from Greenfield
+app.get('/api/polymarket/stats', async (req: Request, res: Response) => {
+  try {
+    const { getBettingStats } = await import('../polymarket/polymarketStorage');
+    const stats = await getBettingStats();
+
+    res.json({
+      stats,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching betting stats:', error);
+    res.status(500).json({
+      error: 'Failed to fetch betting stats',
       message: (error as Error).message,
     });
   }

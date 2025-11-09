@@ -388,3 +388,145 @@ export async function getPolymarketOrderbook(marketId: string): Promise<{
     throw new Error(error.response?.data?.error || 'Failed to fetch orderbook');
   }
 }
+
+// =============================================================================
+// POLYMARKET GREENFIELD STORAGE API
+// =============================================================================
+
+export interface PolymarketBet {
+  id: string;
+  timestamp: number;
+  marketId: string;
+  marketQuestion: string;
+  marketDescription?: string;
+  outcome: string;
+  side: 'BUY' | 'SELL';
+  size: number;
+  price: number;
+  aiAnalysis?: {
+    recommendation: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+    confidence: number;
+    reasoning: string;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    suggestedPrice: number;
+    suggestedSize: number;
+  };
+  marketConditions: {
+    volume24h: number;
+    liquidity: number;
+    midPrice: number;
+    spread: number;
+    timeToExpiry: number;
+  };
+  entryPrice: number;
+  currentPrice?: number;
+  exitPrice?: number;
+  status: 'OPEN' | 'CLOSED' | 'EXPIRED' | 'CANCELLED';
+  outcome_result?: 'WIN' | 'LOSS' | 'PENDING';
+  profitLoss?: number;
+  profitLossPercent?: number;
+  txHash?: string;
+  orderId?: string;
+  network: 'polygon' | 'polygon-mumbai';
+  walletAddress: string;
+}
+
+export interface BettingStats {
+  totalBets: number;
+  openBets: number;
+  closedBets: number;
+  winRate: number;
+  totalProfit: number;
+  avgProfitPerBet: number;
+  bestBet?: PolymarketBet;
+  worstBet?: PolymarketBet;
+  totalVolume: number;
+}
+
+/**
+ * Get bet history from Greenfield
+ */
+export async function getPolymarketHistory(limit: number = 50): Promise<PolymarketBet[]> {
+  try {
+    const response = await apiClient.get<{ bets: PolymarketBet[]; total: number; returned: number }>(
+      '/api/polymarket/history',
+      { params: { limit } }
+    );
+    return response.data.bets || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch bet history');
+  }
+}
+
+/**
+ * Get specific bet by ID
+ */
+export async function getPolymarketBet(betId: string): Promise<PolymarketBet> {
+  try {
+    const response = await apiClient.get<PolymarketBet>(`/api/polymarket/history/${betId}`);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch bet');
+  }
+}
+
+/**
+ * Store a new bet to Greenfield
+ */
+export async function storePolymarketBet(betData: Partial<PolymarketBet>): Promise<{ betId: string; message: string; timestamp: number }> {
+  try {
+    const response = await apiClient.post('/api/polymarket/bet', betData);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to store bet');
+  }
+}
+
+/**
+ * Update an existing bet
+ */
+export async function updatePolymarketBet(betId: string, updates: Partial<PolymarketBet>): Promise<{ betId: string; message: string; timestamp: number }> {
+  try {
+    const response = await apiClient.put(`/api/polymarket/bet/${betId}`, updates);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to update bet');
+  }
+}
+
+/**
+ * Query bets with filters
+ */
+export async function queryPolymarketBets(filters: {
+  marketId?: string;
+  status?: 'OPEN' | 'CLOSED' | 'EXPIRED' | 'CANCELLED';
+  outcome_result?: 'WIN' | 'LOSS' | 'PENDING';
+  minProfitLoss?: number;
+  fromTimestamp?: number;
+  toTimestamp?: number;
+  limit?: number;
+}): Promise<PolymarketBet[]> {
+  try {
+    const response = await apiClient.get<{ bets: PolymarketBet[]; count: number; filters: any; timestamp: number }>(
+      '/api/polymarket/query',
+      { params: filters }
+    );
+    return response.data.bets || [];
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to query bets');
+  }
+}
+
+/**
+ * Get betting statistics from Greenfield
+ */
+export async function getPolymarketBettingStats(): Promise<BettingStats> {
+  try {
+    const response = await apiClient.get<{ stats: BettingStats; timestamp: number }>(
+      '/api/polymarket/stats'
+    );
+    return response.data.stats;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.error || 'Failed to fetch betting stats');
+  }
+}

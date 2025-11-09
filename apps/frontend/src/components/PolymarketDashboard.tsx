@@ -13,12 +13,16 @@ import {
   getPolymarketOrders,
   getCrossPlatformOpportunities,
   analyzePolymarketMarket,
+  getPolymarketHistory,
+  getPolymarketBettingStats,
   PolymarketMarket,
   PolymarketBalance,
   PolymarketPosition,
   PolymarketOrder,
   CrossPlatformOpportunity,
   AIMarketAnalysis,
+  PolymarketBet,
+  BettingStats,
 } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 
@@ -33,6 +37,8 @@ export default function PolymarketDashboard() {
   const [positions, setPositions] = useState<PolymarketPosition[]>([]);
   const [orders, setOrders] = useState<PolymarketOrder[]>([]);
   const [opportunities, setOpportunities] = useState<CrossPlatformOpportunity[]>([]);
+  const [betHistory, setBetHistory] = useState<PolymarketBet[]>([]);
+  const [bettingStats, setBettingStats] = useState<BettingStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
@@ -52,12 +58,14 @@ export default function PolymarketDashboard() {
       setLoading(true);
       setError(null);
 
-      const [marketsData, balanceData, positionsData, ordersData, oppsData] = await Promise.all([
+      const [marketsData, balanceData, positionsData, ordersData, oppsData, historyData, statsData] = await Promise.all([
         getPolymarketMarkets(10),
         getPolymarketBalance(),
         getPolymarketPositions(),
         getPolymarketOrders(),
         getCrossPlatformOpportunities(),
+        getPolymarketHistory(20),
+        getPolymarketBettingStats(),
       ]);
 
       setMarkets(marketsData.map(m => ({ ...m, analyzing: false })));
@@ -65,6 +73,8 @@ export default function PolymarketDashboard() {
       setPositions(positionsData);
       setOrders(ordersData);
       setOpportunities(oppsData);
+      setBetHistory(historyData);
+      setBettingStats(statsData);
     } catch (err: any) {
       console.error('Failed to load Polymarket data:', err);
       setError(err.message || 'Failed to load data');
@@ -169,22 +179,52 @@ export default function PolymarketDashboard() {
         </div>
       )}
 
-      {/* Balance Card */}
-      {balance && (
-        <div className="card p-6">
-          <h3 className="text-xl font-bold mb-4">💰 Wallet Balance</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-gray-400 text-sm">MATIC</p>
-              <p className="text-2xl font-bold">{balance.matic.toFixed(4)}</p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-sm">USDC</p>
-              <p className="text-2xl font-bold">${balance.usdc.toFixed(2)}</p>
+      {/* Balance & Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {balance && (
+          <div className="card p-6">
+            <h3 className="text-xl font-bold mb-4">💰 Wallet Balance</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-gray-400 text-sm">MATIC</p>
+                <p className="text-2xl font-bold">{balance.matic.toFixed(4)}</p>
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm">USDC</p>
+                <p className="text-2xl font-bold">${balance.usdc.toFixed(2)}</p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {bettingStats && (
+          <div className="card p-6">
+            <h3 className="text-xl font-bold mb-4">📊 Betting Stats (Greenfield)</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-gray-400 text-sm">Total Bets</p>
+                <p className="text-2xl font-bold">{bettingStats.totalBets}</p>
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm">Win Rate</p>
+                <p className="text-2xl font-bold text-green-400">
+                  {bettingStats.winRate.toFixed(1)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm">Total P&L</p>
+                <p className={`text-2xl font-bold ${bettingStats.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {bettingStats.totalProfit >= 0 ? '+' : ''}${bettingStats.totalProfit.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm">Volume</p>
+                <p className="text-2xl font-bold">${bettingStats.totalVolume.toFixed(0)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Trending Markets with AI Analysis */}
       <div className="card p-6">
@@ -358,13 +398,81 @@ export default function PolymarketDashboard() {
         </div>
       )}
 
+      {/* Bet History from Greenfield */}
+      {betHistory.length > 0 && (
+        <div className="card p-6">
+          <h3 className="text-xl font-bold mb-4">📜 Bet History (Stored on Greenfield)</h3>
+          <div className="space-y-3">
+            {betHistory.slice(0, 10).map((bet) => (
+              <div key={bet.id} className="bg-gray-800/50 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-sm">{bet.marketQuestion}</h4>
+                    <div className="flex gap-3 text-xs text-gray-400 mt-1">
+                      <span>{bet.outcome}</span>
+                      <span className={bet.side === 'BUY' ? 'text-green-400' : 'text-red-400'}>
+                        {bet.side}
+                      </span>
+                      <span>${bet.size.toFixed(2)} @ {(bet.price * 100).toFixed(1)}%</span>
+                      <span className={`px-2 py-0.5 rounded ${
+                        bet.status === 'OPEN' ? 'bg-blue-900/30 text-blue-400' :
+                        bet.status === 'CLOSED' ? 'bg-gray-700 text-gray-300' :
+                        'bg-yellow-900/30 text-yellow-400'
+                      }`}>
+                        {bet.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right ml-4">
+                    {bet.profitLoss !== undefined && (
+                      <>
+                        <p className={`font-bold ${bet.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {bet.profitLoss >= 0 ? '+' : ''}${bet.profitLoss.toFixed(2)}
+                        </p>
+                        {bet.profitLossPercent !== undefined && (
+                          <p className="text-xs text-gray-400">
+                            {bet.profitLossPercent >= 0 ? '+' : ''}{bet.profitLossPercent.toFixed(1)}%
+                          </p>
+                        )}
+                      </>
+                    )}
+                    {bet.outcome_result && (
+                      <p className={`text-xs mt-1 ${
+                        bet.outcome_result === 'WIN' ? 'text-green-400' :
+                        bet.outcome_result === 'LOSS' ? 'text-red-400' :
+                        'text-yellow-400'
+                      }`}>
+                        {bet.outcome_result}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {bet.aiAnalysis && (
+                  <div className="mt-2 pt-2 border-t border-gray-700">
+                    <p className="text-xs text-gray-400">
+                      AI: {bet.aiAnalysis.recommendation} ({(bet.aiAnalysis.confidence * 100).toFixed(0)}% confident)
+                    </p>
+                  </div>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  {new Date(bet.timestamp).toLocaleString()} • 🟢 Stored on Greenfield
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Empty States */}
-      {positions.length === 0 && orders.length === 0 && !loading && (
+      {positions.length === 0 && orders.length === 0 && betHistory.length === 0 && !loading && (
         <div className="card p-8 text-center">
           <div className="text-4xl mb-3">🎯</div>
-          <p className="text-gray-400">No active positions or orders</p>
+          <p className="text-gray-400">No active positions, orders, or bet history</p>
           <p className="text-sm text-gray-500 mt-1">
             Analyze markets above to find trading opportunities
+          </p>
+          <p className="text-xs text-gray-500 mt-2">
+            All bets are automatically saved to BNB Greenfield for immortal storage
           </p>
         </div>
       )}
