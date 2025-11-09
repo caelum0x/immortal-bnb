@@ -6,39 +6,8 @@ import type { TradeResult } from '../blockchain/tradeExecutor';
 import type { TradeMemory } from '../types/memory';
 
 /**
- * Enhanced Telegram Bot for Immortal AI Trading Bot
+ * Bot state interface
  */
-export async function initializeTelegramBot(): Promise<void> {
-  if (!CONFIG.TELEGRAM_BOT_TOKEN) {
-    logger.warn('Telegram bot token not configured - alerts disabled');
-    return;
-  }
-
-  // Check if token looks valid (should start with a number and contain a colon)
-  if (!CONFIG.TELEGRAM_BOT_TOKEN.includes(':') || CONFIG.TELEGRAM_BOT_TOKEN === 'your_telegram_bot_token_here') {
-    logger.warn('Invalid Telegram bot token format - alerts disabled');
-    logger.info('Get a real token from @BotFather on Telegram');
-    return;
-  }
-
-  try {
-    bot = new Telegraf(CONFIG.TELEGRAM_BOT_TOKEN);
-
-    // Set up bot commands
-    bot.command('start', ctx => {
-      ctx.reply(
-        '🤖 *Immortal AI Trading Bot*\n\n' +
-          'I will send you alerts for:\n' +
-          '• AI trading decisions\n' +
-          '• Trade executions\n' +
-          '• Important events\n\n' +
-          'Commands:\n' +
-          '/status - Get current bot status\n' +
-          '/stats - View trading statistics\n' +
-          '/help - Show help',
-        { parse_mode: 'Markdown' }
-      );
-
 interface BotState {
   isRunning: boolean;
   totalAlerts: number;
@@ -184,9 +153,6 @@ Use /portfolio for current positions.`;
       ctx.reply(statsMessage, { parse_mode: 'Markdown' });
     });
 
-    // Launch bot with error handling
-    await bot.launch();
-    isInitialized = true;
     // Portfolio command
     this.bot.command('portfolio', (ctx) => {
       const portfolioMessage = `💼 *Current Portfolio*
@@ -194,27 +160,6 @@ Use /portfolio for current positions.`;
 💰 Wallet Balance: 0.0000 BNB
 📊 Total Value: $0.00
 
-    // Graceful shutdown
-    const stopHandler = () => {
-      if (bot && isInitialized) {
-        try {
-          bot.stop();
-        } catch (e) {
-          // Ignore stop errors
-        }
-      }
-    };
-
-    process.once('SIGINT', stopHandler);
-    process.once('SIGTERM', stopHandler);
-  } catch (error) {
-    logError('initializeTelegramBot', error as Error);
-    logger.warn('Telegram bot initialization failed - continuing without alerts');
-    logger.info('Check your TELEGRAM_BOT_TOKEN in .env or disable Telegram alerts');
-    bot = null;
-    isInitialized = false;
-  }
-}
 📈 *Active Positions:*
 _No active positions_
 
