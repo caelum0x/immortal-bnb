@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import type { Request, Response } from 'express';
 import cors from 'cors';
 import { logger } from './utils/logger';
 import { fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
@@ -66,7 +67,7 @@ app.post(
   botControlLimiter,
   validateStartBot,
   handleValidationErrors,
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const { tokens, risk } = req.body;
 
@@ -82,9 +83,9 @@ app.post(
       BotState.start({
         tokens: validTokens,
         riskLevel: risk,
-        maxTradeAmount: parseFloat(CONFIG.MAX_TRADE_AMOUNT_BNB),
-        stopLoss: parseFloat(CONFIG.STOP_LOSS_PERCENTAGE),
-        interval: parseInt(CONFIG.BOT_LOOP_INTERVAL_MS),
+        maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
+        stopLoss: CONFIG.STOP_LOSS_PERCENTAGE,
+        interval: CONFIG.BOT_LOOP_INTERVAL_MS,
         network: CONFIG.NETWORK as 'testnet' | 'mainnet',
       });
 
@@ -100,9 +101,9 @@ app.post(
         config: {
           tokens: validTokens,
           riskLevel: risk,
-          interval: parseInt(CONFIG.BOT_LOOP_INTERVAL_MS),
-          maxTradeAmount: parseFloat(CONFIG.MAX_TRADE_AMOUNT_BNB),
-          stopLoss: parseFloat(CONFIG.STOP_LOSS_PERCENTAGE),
+          interval: CONFIG.BOT_LOOP_INTERVAL_MS,
+          maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
+          stopLoss: CONFIG.STOP_LOSS_PERCENTAGE,
           network: CONFIG.NETWORK,
         },
       });
@@ -121,7 +122,7 @@ app.post(
  * Stop the trading bot
  * Protected with: rate limiting
  */
-app.post('/api/stop-bot', botControlLimiter, async (req, res) => {
+app.post('/api/stop-bot', botControlLimiter, async (req: Request, res: Response) => {
   try {
     if (!BotState.isRunning()) {
       return res.status(400).json({ error: 'Bot is not running' });
@@ -145,7 +146,7 @@ app.post('/api/stop-bot', botControlLimiter, async (req, res) => {
  * Get current bot status
  * Protected with: read rate limiting
  */
-app.get('/api/bot-status', readLimiter, async (req, res) => {
+app.get('/api/bot-status', readLimiter, async (req: Request, res: Response) => {
   try {
     const status = BotState.getStatus();
     res.json(status);
@@ -165,7 +166,7 @@ app.get(
   readLimiter,
   validateMemoriesQuery,
   handleValidationErrors,
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const memoryIds = await fetchAllMemories();
@@ -201,7 +202,7 @@ app.get(
   readLimiter,
   validateDiscoverTokensQuery,
   handleValidationErrors,
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 10;
       const trending = await getTrendingTokens(limit);
@@ -228,7 +229,7 @@ app.get(
   readLimiter,
   validateTradeLogsQuery,
   handleValidationErrors,
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const logs = BotState.getTradeLogs(limit);
@@ -249,7 +250,7 @@ app.get(
  * Get trading statistics
  * Protected with: read rate limiting
  */
-app.get('/api/trading-stats', readLimiter, async (req, res) => {
+app.get('/api/trading-stats', readLimiter, async (req: Request, res: Response) => {
   try {
     // Get stats from BotState (real-time from current session)
     const stats = BotState.getStats();
@@ -299,7 +300,7 @@ app.get('/api/trading-stats', readLimiter, async (req, res) => {
  * Health check
  * Protected with: health check rate limiting
  */
-app.get('/health', healthCheckLimiter, (req, res) => {
+app.get('/health', healthCheckLimiter, (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: Date.now(),

@@ -25,18 +25,6 @@ const Web3Context = createContext<{
   switchNetwork: async () => {},
 });
 
-// Declare ethereum property on window
-declare global {
-  interface Window {
-    ethereum?: {
-      request: (args: { method: string; params?: any[] }) => Promise<any>;
-      on: (event: string, handler: (...args: any[]) => void) => void;
-      removeListener: (event: string, handler: (...args: any[]) => void) => void;
-      isMetaMask?: boolean;
-    };
-  }
-}
-
 export default function Web3Provider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [address, setAddress] = useState<string | null>(null);

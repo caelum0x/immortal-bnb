@@ -55,9 +55,9 @@ class BotStateManager {
     this.config = {
       tokens: config.tokens || [],
       riskLevel: config.riskLevel || 5,
-      maxTradeAmount: config.maxTradeAmount || parseFloat(CONFIG.MAX_TRADE_AMOUNT_BNB),
-      stopLoss: config.stopLoss || parseFloat(CONFIG.STOP_LOSS_PERCENTAGE),
-      interval: config.interval || parseInt(CONFIG.BOT_LOOP_INTERVAL_MS),
+      maxTradeAmount: config.maxTradeAmount || CONFIG.MAX_TRADE_AMOUNT_BNB,
+      stopLoss: config.stopLoss || CONFIG.STOP_LOSS_PERCENTAGE,
+      interval: config.interval || CONFIG.BOT_LOOP_INTERVAL_MS,
       network: (config.network || CONFIG.NETWORK) as 'testnet' | 'mainnet',
     };
 
