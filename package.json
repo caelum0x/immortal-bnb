@@ -22,6 +22,7 @@
     "test:integration": "bun test-integration.ts",
     "test:trade": "bun test-trade.ts",
     "test:polymarket": "bun test-polymarket.ts",
+    "polymarket:demo": "bun polymarket-live-demo.ts",
     "lint": "eslint src/**/*.ts",
     "healthcheck": "bun run scripts/healthcheck.ts",
     "monitor": "bun run scripts/monitor.ts",
