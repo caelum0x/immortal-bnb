@@ -37,6 +37,19 @@ const NETWORK_CONFIG = {
     WBNB_ADDRESS: process.env.WBNB_ADDRESS || '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
     EXPLORER: IS_MAINNET ? 'https://bscscan.com' : 'https://testnet.bscscan.com',
   },
+  polygon: {
+    RPC: IS_MAINNET
+      ? process.env.POLYGON_RPC || 'https://polygon-rpc.com'
+      : process.env.POLYGON_TESTNET_RPC || 'https://rpc-mumbai.maticvigil.com',
+    WSS: IS_MAINNET
+      ? 'wss://polygon-bor.publicnode.com'
+      : 'wss://polygon-mumbai-bor.publicnode.com',
+    CHAIN_ID: IS_MAINNET ? 137 : 80001,
+    USDC_ADDRESS: IS_MAINNET
+      ? '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' // USDC on Polygon
+      : '0x0FA8781a83E46826621b3BC094Ea2A0212e71B23', // Mumbai testnet USDC
+    EXPLORER: IS_MAINNET ? 'https://polygonscan.com' : 'https://mumbai.polygonscan.com',
+  },
 };
 
 // Get current network configuration
@@ -105,6 +118,13 @@ export const CONFIG = {
   // ===== DexScreener API =====
   DEXSCREENER_API_URL: process.env.DEXSCREENER_API_URL || 'https://api.dexscreener.com/latest/dex',
   DEXSCREENER_CHAIN: process.env.DEXSCREENER_CHAIN || 'bsc', // bsc for BNB Chain
+
+  // ===== Polymarket Configuration =====
+  POLYMARKET_ENABLED: process.env.POLYMARKET_ENABLED === 'true',
+  POLYMARKET_HOST: process.env.POLYMARKET_HOST || 'https://clob.polymarket.com',
+  POLYMARKET_CHAIN_ID: parseInt(process.env.POLYMARKET_CHAIN_ID || '137'), // Polygon mainnet
+  POLYGON_RPC: process.env.POLYGON_RPC || 'https://polygon-rpc.com',
+  POLYGON_TESTNET_RPC: process.env.POLYGON_TESTNET_RPC || 'https://rpc-mumbai.maticvigil.com',
 
   // API Server
   API_PORT: parseInt(process.env.API_PORT || '3001'),
