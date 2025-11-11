@@ -257,11 +257,13 @@ export function useDashboardStats() {
     try {
       setData(prev => ({ ...prev, isLoading: true, error: null }));
       const result = await api.getDashboardStats();
-      setData({
+      setData(prev => ({
+        ...prev,
         ...result,
+        profitChange: result.profitChange || '0.00',
         isLoading: false,
         error: null,
-      });
+      }));
     } catch (error) {
       setData(prev => ({
         ...prev,

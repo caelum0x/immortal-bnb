@@ -78,8 +78,32 @@ export const CONFIG = {
   RPC_URL_MAINNET: process.env.RPC_URL_MAINNET || 'https://bsc-dataseed.binance.org',
 
   WALLET_PRIVATE_KEY: process.env.WALLET_PRIVATE_KEY || '',
-  WALLET_ADDRESS: process.env.WALLET_ADDRESS || (process.env.WALLET_PRIVATE_KEY ?
-    new ethers.Wallet(process.env.WALLET_PRIVATE_KEY).address : ''),
+  WALLET_ADDRESS: (() => {
+    if (process.env.WALLET_ADDRESS) {
+      return process.env.WALLET_ADDRESS;
+    }
+    
+    const privateKey = process.env.WALLET_PRIVATE_KEY;
+    if (!privateKey) {
+      console.warn('⚠️  WALLET_PRIVATE_KEY not set in .env file');
+      return '';
+    }
+    
+    // Check if private key has correct length (64 hex chars or 66 with 0x prefix)
+    const keyLength = privateKey.length;
+    if (keyLength !== 64 && keyLength !== 66) {
+      console.error(`❌ Invalid WALLET_PRIVATE_KEY length: ${keyLength} (expected 64 or 66 characters)`);
+      console.error('   Private key should be 64 hex characters or 66 with 0x prefix');
+      return '';
+    }
+    
+    try {
+      return new ethers.Wallet(privateKey).address;
+    } catch (error) {
+      console.error('❌ Invalid WALLET_PRIVATE_KEY format:', (error as Error).message);
+      return '';
+    }
+  })(),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',

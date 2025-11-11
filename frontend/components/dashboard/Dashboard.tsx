@@ -57,10 +57,10 @@ export default function Dashboard() {
               </div>
               <div className="text-right">
                 <div className={`text-sm ${
-                  profitChange.startsWith('+') ? 'text-green-400' : 
-                  profitChange.startsWith('-') ? 'text-red-400' : 'text-slate-400'
+                  profitChange?.startsWith('+') ? 'text-green-400' : 
+                  profitChange?.startsWith('-') ? 'text-red-400' : 'text-slate-400'
                 }`}>
-                  {profitChange}%
+                  {profitChange || '0'}%
                 </div>
                 <div className="text-xs text-slate-400">This month</div>
               </div>

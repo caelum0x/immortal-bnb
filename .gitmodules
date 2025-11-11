@@ -1,3 +1,6 @@
 [submodule "clob-client"]
 	path = clob-client
 	url = https://github.com/Polymarket/clob-client.git
+[submodule "agents"]
+	path = agents
+	url = https://github.com/Polymarket/agents.git
