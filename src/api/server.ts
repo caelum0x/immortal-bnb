@@ -6,6 +6,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
+import { createServer } from 'http';
 import { CONFIG } from '../config';
 import { logger } from '../utils/logger';
 import { getWalletBalance } from '../blockchain/tradeExecutor';
@@ -16,6 +17,8 @@ import { ImmortalAIAgent } from '../ai/immortalAgent';
 import { CrossChainArbitrageEngine } from '../ai/crossChainStrategy';
 import { StrategyEvolutionEngine } from '../ai/strategyEvolution';
 import { getAIDecision, analyzeSentiment } from '../ai/llmInterface';
+import { initializeWebSocketService, getWebSocketService } from '../services/websocket.js';
+import { getPythonBridge } from '../services/pythonBridge.js';
 
 const app = express();
 const port = CONFIG.API_PORT;
@@ -274,11 +277,22 @@ app.get('/api/token/:address/balance', async (req: Request, res: Response) => {
 export function startAPIServer() {
   // Initialize AI system before starting the server
   initializeAISystem();
-  
-  app.listen(port, () => {
+
+  // Create HTTP server
+  const httpServer = createServer(app);
+
+  // Initialize WebSocket service
+  const wsService = initializeWebSocketService(httpServer);
+  logger.info('🔌 WebSocket service initialized');
+
+  // Start listening
+  httpServer.listen(port, () => {
     logger.info(`🌐 API Server running on http://localhost:${port}`);
     logger.info(`📡 Health check: http://localhost:${port}/api/health`);
+    logger.info(`🔌 WebSocket server ready`);
   });
+
+  return { httpServer, wsService };
 }
 
 // =============================================================================
@@ -1030,4 +1044,202 @@ app.get('/api/polymarket/trader/:address/strategy', async (req: Request, res: Re
 
 // =============================================================================
 // END POLYMARKET ENDPOINTS
+// =============================================================================
+
+// =============================================================================
+// UNIFIED CROSS-CHAIN ENDPOINTS
+// =============================================================================
+
+// Get unified bot status (DEX + Polymarket)
+app.get('/api/unified/status', async (req: Request, res: Response) => {
+  try {
+    const pythonBridge = getPythonBridge();
+
+    // Get Python API status
+    let pythonStatus = null;
+    try {
+      const isHealthy = await pythonBridge.isServiceHealthy();
+      if (isHealthy) {
+        pythonStatus = await pythonBridge.getAgentStatus();
+      }
+    } catch (error) {
+      logger.warn('Python API not available:', error);
+    }
+
+    // Get DEX balance
+    const dexBalance = await getWalletBalance();
+
+    res.json({
+      dex: {
+        status: 'operational',
+        balance: dexBalance,
+        chain: CONFIG.IS_OPBNB ? 'opbnb' : 'bnb',
+        network: CONFIG.IS_MAINNET ? 'mainnet' : 'testnet',
+      },
+      polymarket: pythonStatus ? {
+        status: pythonStatus.status,
+        agents: pythonStatus.agents,
+        environment: pythonStatus.environment,
+      } : {
+        status: 'unavailable',
+        message: 'Python API is not running',
+      },
+      websocket: {
+        connected: getWebSocketService()?.getConnectedClientsCount() || 0,
+        status: 'operational',
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified status:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified status',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get unified opportunities (DEX + Polymarket)
+app.get('/api/unified/opportunities', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10;
+    const pythonBridge = getPythonBridge();
+
+    const opportunities = [];
+
+    // Try to get Polymarket opportunities
+    try {
+      const polyOpps = await pythonBridge.discoverOpportunities(limit);
+      opportunities.push(...polyOpps.map((opp: any) => ({
+        ...opp,
+        source: 'polymarket',
+      })));
+    } catch (error) {
+      logger.warn('Could not fetch Polymarket opportunities:', error);
+    }
+
+    // Get cross-chain arbitrage opportunities if available
+    if (crossChainEngine) {
+      try {
+        const crossChainOpps = await crossChainEngine.findArbitrageOpportunities();
+        opportunities.push(...crossChainOpps.map((opp: any) => ({
+          ...opp,
+          source: 'cross-chain',
+        })));
+      } catch (error) {
+        logger.warn('Could not fetch cross-chain opportunities:', error);
+      }
+    }
+
+    res.json({
+      opportunities,
+      count: opportunities.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified opportunities:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified opportunities',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get unified portfolio value (DEX + Polymarket)
+app.get('/api/unified/portfolio', async (req: Request, res: Response) => {
+  try {
+    const pythonBridge = getPythonBridge();
+
+    // Get DEX balance
+    const dexBalance = await getWalletBalance();
+
+    // Get Polymarket balance
+    let polymarketBalance = 0;
+    try {
+      const polyBalance = await pythonBridge.getBalance();
+      polymarketBalance = polyBalance.usdc_balance;
+    } catch (error) {
+      logger.warn('Could not fetch Polymarket balance:', error);
+    }
+
+    // Get historical stats
+    const dexStats = await import('../blockchain/memoryStorage').then(m => m.fetchAllMemories());
+    const dexPnL = dexStats.reduce((sum: number, trade: any) => sum + (trade.profitLoss || 0), 0);
+
+    res.json({
+      dex: {
+        balance: dexBalance,
+        pnl: dexPnL,
+        currency: 'BNB',
+      },
+      polymarket: {
+        balance: polymarketBalance,
+        pnl: 0, // TODO: Calculate from Polymarket stats
+        currency: 'USDC',
+      },
+      total: {
+        dex_bnb: dexBalance,
+        polymarket_usd: polymarketBalance,
+        combined_pnl: dexPnL,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified portfolio:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified portfolio',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get unified balance across all chains
+app.get('/api/unified/balance', async (req: Request, res: Response) => {
+  try {
+    const pythonBridge = getPythonBridge();
+
+    const balances = [];
+
+    // DEX balance (BNB/opBNB)
+    try {
+      const dexBalance = await getWalletBalance();
+      balances.push({
+        chain: CONFIG.IS_OPBNB ? 'opbnb' : 'bnb',
+        token: 'BNB',
+        balance: dexBalance,
+        address: CONFIG.WALLET_ADDRESS,
+      });
+    } catch (error) {
+      logger.warn('Could not fetch DEX balance:', error);
+    }
+
+    // Polymarket balance (Polygon)
+    try {
+      const polyBalance = await pythonBridge.getBalance();
+      balances.push({
+        chain: 'polygon',
+        token: 'USDC',
+        balance: polyBalance.usdc_balance,
+        address: polyBalance.address,
+      });
+    } catch (error) {
+      logger.warn('Could not fetch Polymarket balance:', error);
+    }
+
+    res.json({
+      balances,
+      count: balances.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified balance:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified balance',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
+// END UNIFIED ENDPOINTS
 // =============================================================================
