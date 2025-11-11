@@ -1243,3 +1243,124 @@ app.get('/api/unified/balance', async (req: Request, res: Response) => {
 // =============================================================================
 // END UNIFIED ENDPOINTS
 // =============================================================================
+
+
+// =============================================================================
+// UNIFIED MEMORY SYSTEM ENDPOINTS
+// =============================================================================
+
+// Get unified memory analytics
+app.get("/api/memory/analytics", async (req, res) => {
+  try {
+    const { getUnifiedAnalytics } = await import("../blockchain/unifiedMemoryStorage.js");
+    const analytics = await getUnifiedAnalytics();
+    res.json(analytics);
+  } catch (error) {
+    logger.error("Error fetching memory analytics:", error);
+    res.status(500).json({ error: "Failed to fetch memory analytics", message: error.message });
+  }
+});
+
+// Query unified memories with filters
+app.post("/api/memory/query", async (req, res) => {
+  try {
+    const filters = req.body;
+    const { queryUnifiedMemories } = await import("../blockchain/unifiedMemoryStorage.js");
+    const memories = await queryUnifiedMemories(filters);
+    res.json({ memories, count: memories.length, filters, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error querying memories:", error);
+    res.status(500).json({ error: "Failed to query memories", message: error.message });
+  }
+});
+
+// Get memory synchronization status
+app.get("/api/memory/sync-status", async (req, res) => {
+  try {
+    const { getSyncStatus } = await import("../blockchain/unifiedMemoryStorage.js");
+    const status = getSyncStatus();
+    res.json(status);
+  } catch (error) {
+    logger.error("Error fetching sync status:", error);
+    res.status(500).json({ error: "Failed to fetch sync status", message: error.message });
+  }
+});
+
+// Force synchronization of pending memories
+app.post("/api/memory/force-sync", async (req, res) => {
+  try {
+    const { forceSyncAll } = await import("../blockchain/unifiedMemoryStorage.js");
+    await forceSyncAll();
+    res.json({ success: true, message: "Synchronization initiated", timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error forcing sync:", error);
+    res.status(500).json({ error: "Failed to force sync", message: error.message });
+  }
+});
+
+// Store a new unified memory
+app.post("/api/memory/store", async (req, res) => {
+  try {
+    const memory = req.body;
+    const { storeUnifiedMemory } = await import("../blockchain/unifiedMemoryStorage.js");
+    const success = await storeUnifiedMemory(memory);
+    res.json({ success, id: memory.id, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error storing memory:", error);
+    res.status(500).json({ error: "Failed to store memory", message: error.message });
+  }
+});
+
+// =============================================================================
+// END UNIFIED MEMORY SYSTEM ENDPOINTS
+// =============================================================================
+
+
+// =============================================================================
+// AI ORCHESTRATOR ENDPOINTS
+// =============================================================================
+
+// Get AI orchestrator decision
+app.post("/api/orchestrator/decision", async (req, res) => {
+  try {
+    const request = req.body;
+    const { getOrchestrator } = await import("../ai/orchestrator.js");
+    const orchestrator = getOrchestrator();
+    const decision = await orchestrator.makeDecision(request);
+    res.json(decision);
+  } catch (error) {
+    logger.error("Error getting orchestrator decision:", error);
+    res.status(500).json({ error: "Failed to get decision", message: error.message });
+  }
+});
+
+// Get orchestrator performance metrics
+app.get("/api/orchestrator/metrics", async (req, res) => {
+  try {
+    const { getOrchestrator } = await import("../ai/orchestrator.js");
+    const orchestrator = getOrchestrator();
+    const metrics = orchestrator.getPerformanceMetrics();
+    res.json({ metrics, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error getting orchestrator metrics:", error);
+    res.status(500).json({ error: "Failed to get metrics", message: error.message });
+  }
+});
+
+// Record trade outcome for learning
+app.post("/api/orchestrator/outcome", async (req, res) => {
+  try {
+    const { agentType, success } = req.body;
+    const { getOrchestrator } = await import("../ai/orchestrator.js");
+    const orchestrator = getOrchestrator();
+    orchestrator.recordOutcome(agentType, success);
+    res.json({ success: true, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error recording outcome:", error);
+    res.status(500).json({ error: "Failed to record outcome", message: error.message });
+  }
+});
+
+// =============================================================================
+// END AI ORCHESTRATOR ENDPOINTS
+// =============================================================================

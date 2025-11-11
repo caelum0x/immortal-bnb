@@ -1,48 +1,104 @@
+# Docker Compose configuration for Immortal AI Trading Bot
+# Multi-service orchestration: Frontend + TypeScript Backend + Python Microservice
+
 version: '3.8'
 
 services:
-  # AI Trading Bot Backend
-  bot:
+  # ============================================================================
+  # Python Microservice (Polymarket AI Agents)
+  # ============================================================================
+  python-api:
     build:
-      context: .
+      context: ./agents
       dockerfile: Dockerfile
-    container_name: immortal-bot
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - NODE_ENV=production
-      - TRADING_NETWORK=opbnb
-      - NETWORK=testnet
+    container_name: immortal-python-api
     ports:
-      - "3001:3001"
-    volumes:
-      - ./logs:/app/logs
+      - "5000:5000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=5000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - POLYGON_WALLET_PRIVATE_KEY=${POLYGON_WALLET_PRIVATE_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - NEWSAPI_API_KEY=${NEWSAPI_API_KEY:-}
+      - ENABLE_TRADING=${ENABLE_TRADING:-false}
+      - PYTHON_API_KEY=${PYTHON_API_KEY:-}
+    networks:
+      - immortal-network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    volumes:
+      - ./agents/logs:/app/logs
+
+  # ============================================================================
+  # TypeScript Backend (API Gateway + DEX Trading)
+  # ============================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: immortal-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - API_PORT=3001
+      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GREENFIELD_BUCKET_NAME=${GREENFIELD_BUCKET_NAME}
+      - GREENFIELD_RPC_URL=${GREENFIELD_RPC_URL}
+      - GREENFIELD_CHAIN_ID=${GREENFIELD_CHAIN_ID}
+      - PYTHON_API_URL=http://python-api:5000
+      - PYTHON_API_KEY=${PYTHON_API_KEY:-}
+      - TRADING_NETWORK=${TRADING_NETWORK:-opbnb}
+      - NETWORK=${NETWORK:-testnet}
+      - POLYMARKET_ENABLED=${POLYMARKET_ENABLED:-true}
+      - ENABLE_CROSS_CHAIN=${ENABLE_CROSS_CHAIN:-true}
+    depends_on:
+      python-api:
+        condition: service_healthy
     networks:
       - immortal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./logs:/app/logs
 
-  # Frontend Dashboard (Next.js)
+  # ============================================================================
+  # Frontend (Next.js Dashboard)
+  # ============================================================================
   frontend:
     build:
-      context: ./apps/frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: immortal-frontend
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://bot:3001
     ports:
       - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:3001
+      - NEXT_PUBLIC_WS_URL=http://backend:3001
     depends_on:
-      - bot
+      backend:
+        condition: service_healthy
     networks:
       - immortal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   immortal-network:
@@ -50,3 +106,4 @@ networks:
 
 volumes:
   logs:
+  agent-logs:
