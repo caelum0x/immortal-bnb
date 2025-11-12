@@ -1,26 +1,52 @@
-/**
- * Production Trading Stats Component
- * Real-time display of trading performance - NO MOCKS
- */
-
 'use client';
 
-import { getTradingStats, TradingStats as StatsType } from '@/lib/api';
-import { usePolling } from '@/hooks/usePolling';
+import { useEffect, useState } from 'react';
+import api from '@/lib/apiClient';
+
+interface Stats {
+  totalTrades: number;
+  completedTrades: number;
+  pendingTrades: number;
+  profitableTrades: number;
+  losingTrades: number;
+  winRate: number;
+  totalProfitLoss: number;
+  bestTrade: any;
+  worstTrade: any;
+}
 
 export default function TradingStats() {
-  const { data: stats, error, loading } = usePolling<StatsType>(
-    () => getTradingStats(),
-    { interval: 30000 } // Refresh every 30 seconds
-  );
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchStats = async () => {
+    try {
+      // Using the /api/stats endpoint from backend
+      const response = await fetch('http://localhost:3001/api/stats');
+      const data = await response.json();
+      setStats(data);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch stats');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="card p-6 animate-pulse">
-            <div className="h-4 bg-gray-700 rounded w-1/2 mb-2"></div>
-            <div className="h-8 bg-gray-700 rounded w-3/4"></div>
+          <div key={i} className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 animate-pulse">
+            <div className="h-4 bg-slate-700 rounded w-1/2 mb-3" />
+            <div className="h-8 bg-slate-700 rounded w-3/4" />
           </div>
         ))}
       </div>
@@ -29,23 +55,16 @@ export default function TradingStats() {
 
   if (error) {
     return (
-      <div className="card p-6 bg-red-900/20 border border-red-500">
-        <div className="flex items-center">
-          <span className="text-2xl mr-3">❌</span>
-          <div>
-            <p className="font-semibold text-red-500">Failed to Load Stats</p>
-            <p className="text-sm text-gray-300">{error.message}</p>
-          </div>
-        </div>
+      <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-6">
+        <p className="text-red-400 text-sm">⚠ {error}</p>
       </div>
     );
   }
 
   if (!stats) {
     return (
-      <div className="card p-6 text-center">
-        <div className="text-4xl mb-2">📊</div>
-        <p className="text-gray-400">No trading data available</p>
+      <div className="text-center py-12">
+        <p className="text-slate-400">No stats available</p>
       </div>
     );
   }
@@ -55,43 +74,145 @@ export default function TradingStats() {
       label: 'Total Trades',
       value: stats.totalTrades,
       icon: '📊',
-      color: 'text-blue-500',
+      gradient: 'from-blue-500 to-cyan-500',
+      bg: 'from-blue-500/10 to-cyan-500/10',
+      border: 'border-blue-500/30',
+      textColor: 'text-blue-400',
     },
     {
       label: 'Win Rate',
       value: `${stats.winRate.toFixed(1)}%`,
+      subtext: `${stats.profitableTrades}W / ${stats.losingTrades}L`,
       icon: '🎯',
-      color: stats.winRate >= 60 ? 'text-green-500' : 'text-yellow-500',
-      subtext: `${stats.wins}W / ${stats.losses}L`,
+      gradient: stats.winRate >= 60 ? 'from-green-500 to-emerald-500' : 'from-yellow-500 to-orange-500',
+      bg: stats.winRate >= 60 ? 'from-green-500/10 to-emerald-500/10' : 'from-yellow-500/10 to-orange-500/10',
+      border: stats.winRate >= 60 ? 'border-green-500/30' : 'border-yellow-500/30',
+      textColor: stats.winRate >= 60 ? 'text-green-400' : 'text-yellow-400',
     },
     {
       label: 'Total P&L',
-      value: `${stats.totalPL >= 0 ? '+' : ''}${stats.totalPL.toFixed(4)} BNB`,
-      icon: stats.totalPL >= 0 ? '📈' : '📉',
-      color: stats.totalPL >= 0 ? 'text-green-500' : 'text-red-500',
+      value: `${stats.totalProfitLoss >= 0 ? '+' : ''}${stats.totalProfitLoss.toFixed(4)} BNB`,
+      icon: stats.totalProfitLoss >= 0 ? '📈' : '📉',
+      gradient: stats.totalProfitLoss >= 0 ? 'from-green-500 to-emerald-500' : 'from-red-500 to-rose-500',
+      bg: stats.totalProfitLoss >= 0 ? 'from-green-500/10 to-emerald-500/10' : 'from-red-500/10 to-rose-500/10',
+      border: stats.totalProfitLoss >= 0 ? 'border-green-500/30' : 'border-red-500/30',
+      textColor: stats.totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400',
     },
     {
-      label: 'Avg P&L',
-      value: `${stats.avgPL >= 0 ? '+' : ''}${stats.avgPL.toFixed(4)} BNB`,
-      icon: '💰',
-      color: stats.avgPL >= 0 ? 'text-green-500' : 'text-red-500',
+      label: 'Pending Trades',
+      value: stats.pendingTrades,
+      icon: '⏳',
+      gradient: 'from-purple-500 to-pink-500',
+      bg: 'from-purple-500/10 to-pink-500/10',
+      border: 'border-purple-500/30',
+      textColor: 'text-purple-400',
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {statCards.map((stat, index) => (
-        <div key={index} className="card p-6 hover:shadow-xl transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-400">{stat.label}</p>
-            <span className="text-2xl">{stat.icon}</span>
+    <div className="space-y-6">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {statCards.map((stat, index) => (
+          <div key={index} className="relative group">
+            {/* Glow Effect */}
+            <div className={`absolute inset-0 bg-gradient-to-r ${stat.bg} rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity`} />
+
+            {/* Card */}
+            <div className={`relative bg-slate-800/50 backdrop-blur-xl border ${stat.border} rounded-xl p-6 hover:scale-[1.02] transition-transform`}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-slate-400">{stat.label}</span>
+                <div className={`w-10 h-10 bg-gradient-to-br ${stat.gradient} rounded-lg flex items-center justify-center shadow-lg`}>
+                  <span className="text-xl">{stat.icon}</span>
+                </div>
+              </div>
+              <div className={`text-3xl font-bold ${stat.textColor} mb-1`}>
+                {stat.value}
+              </div>
+              {stat.subtext && (
+                <div className="text-xs text-slate-500">{stat.subtext}</div>
+              )}
+            </div>
           </div>
-          <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-          {stat.subtext && (
-            <p className="text-xs text-gray-500 mt-1">{stat.subtext}</p>
+        ))}
+      </div>
+
+      {/* Best & Worst Trades */}
+      {(stats.bestTrade || stats.worstTrade) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Best Trade */}
+          {stats.bestTrade && (
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-xl blur" />
+              <div className="relative bg-slate-800/50 backdrop-blur-xl border border-green-500/30 rounded-xl p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center">
+                    <span className="text-xl">🏆</span>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Best Trade</h3>
+                    <p className="text-xs text-slate-400">Highest profit</p>
+                  </div>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Pair:</span>
+                    <span className="text-white font-semibold">{stats.bestTrade.pair || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Profit:</span>
+                    <span className="text-green-400 font-bold">
+                      +{stats.bestTrade.profitLoss?.toFixed(4)} BNB
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Date:</span>
+                    <span className="text-slate-300 text-xs">
+                      {new Date(stats.bestTrade.timestamp).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Worst Trade */}
+          {stats.worstTrade && (
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-red-500/20 to-rose-500/20 rounded-xl blur" />
+              <div className="relative bg-slate-800/50 backdrop-blur-xl border border-red-500/30 rounded-xl p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center">
+                    <span className="text-xl">⚠️</span>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Worst Trade</h3>
+                    <p className="text-xs text-slate-400">Biggest loss</p>
+                  </div>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Pair:</span>
+                    <span className="text-white font-semibold">{stats.worstTrade.pair || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Loss:</span>
+                    <span className="text-red-400 font-bold">
+                      {stats.worstTrade.profitLoss?.toFixed(4)} BNB
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Date:</span>
+                    <span className="text-slate-300 text-xs">
+                      {new Date(stats.worstTrade.timestamp).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
