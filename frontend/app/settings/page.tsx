@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import { useWeb3 } from '@/components/providers/Web3Provider'
+import TelegramSettings from '@/components/TelegramSettings'
 
 interface BotSettings {
   // Risk Management
@@ -468,6 +469,11 @@ export default function SettingsPage() {
               </label>
             </div>
           </div>
+        </div>
+
+        {/* Telegram Settings */}
+        <div className="bg-slate-800/50 p-6 rounded-lg border border-purple-500/30 mb-6">
+          <TelegramSettings />
         </div>
 
         {/* Save Message */}

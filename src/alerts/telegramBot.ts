@@ -471,6 +471,199 @@ ${price ? `💵 Price: $${price.toFixed(6)}` : ''}
   }
 
   /**
+   * Send position update alert
+   */
+  async sendPositionUpdate(position: {
+    tokenSymbol: string;
+    tokenAddress: string;
+    entryPrice: number;
+    currentPrice: number;
+    amountBNB: number;
+    pnl: number;
+    pnlPercent: number;
+  }): Promise<void> {
+    const emoji = position.pnl >= 0 ? '📈' : '📉';
+    const pnlEmoji = position.pnl >= 0 ? '💰' : '💸';
+    const sign = position.pnl >= 0 ? '+' : '';
+
+    const message = `${emoji} *POSITION UPDATE*
+
+🪙 Token: ${position.tokenSymbol}
+📊 Entry Price: $${position.entryPrice.toFixed(6)}
+💵 Current Price: $${position.currentPrice.toFixed(6)}
+💰 Amount: ${position.amountBNB.toFixed(4)} BNB
+${pnlEmoji} P/L: ${sign}${position.pnl.toFixed(4)} BNB (${sign}${position.pnlPercent.toFixed(2)}%)
+🕐 Time: ${new Date().toLocaleString()}`;
+
+    await this.sendAlert(message, position.pnl >= 0 ? 'profit' : 'loss');
+  }
+
+  /**
+   * Send market alert (price movements, volatility, etc.)
+   */
+  async sendMarketAlert(alert: {
+    type: 'price_spike' | 'price_drop' | 'high_volatility' | 'liquidity_change';
+    token: string;
+    details: string;
+    severity?: 'low' | 'medium' | 'high';
+  }): Promise<void> {
+    const typeEmojis = {
+      price_spike: '🚀',
+      price_drop: '💥',
+      high_volatility: '⚡',
+      liquidity_change: '💧'
+    };
+
+    const severityEmojis = {
+      low: '🟢',
+      medium: '🟡',
+      high: '🔴'
+    };
+
+    const emoji = typeEmojis[alert.type];
+    const severityEmoji = alert.severity ? severityEmojis[alert.severity] : '🟡';
+
+    const message = `${emoji} *MARKET ALERT* ${severityEmoji}
+
+🪙 Token: ${alert.token}
+📊 Type: ${alert.type.replace('_', ' ').toUpperCase()}
+💡 Details: ${alert.details}
+🕐 Time: ${new Date().toLocaleString()}`;
+
+    await this.sendAlert(message, 'warning');
+  }
+
+  /**
+   * Send Polymarket analysis alert
+   */
+  async sendPolymarketAlert(analysis: {
+    marketQuestion: string;
+    predictedOutcome: string;
+    recommendation: string;
+    confidence: number;
+    reasoning: string;
+  }): Promise<void> {
+    const message = `🎯 *POLYMARKET ANALYSIS*
+
+❓ Market: ${analysis.marketQuestion}
+🎲 Prediction: ${analysis.predictedOutcome}
+🤖 Recommendation: ${analysis.recommendation}
+📊 Confidence: ${(analysis.confidence * 100).toFixed(1)}%
+💭 Reasoning: ${analysis.reasoning.substring(0, 200)}${analysis.reasoning.length > 200 ? '...' : ''}
+🕐 Time: ${new Date().toLocaleString()}`;
+
+    await this.sendAlert(message, 'decision');
+  }
+
+  /**
+   * Send risk warning alert
+   */
+  async sendRiskWarning(warning: {
+    level: 'low' | 'medium' | 'high' | 'critical';
+    title: string;
+    description: string;
+    action?: string;
+  }): Promise<void> {
+    const levelEmojis = {
+      low: '🟢',
+      medium: '🟡',
+      high: '🟠',
+      critical: '🔴'
+    };
+
+    const emoji = levelEmojis[warning.level];
+
+    const message = `${emoji} *RISK WARNING* ${emoji}
+
+⚠️ ${warning.title}
+📝 ${warning.description}
+${warning.action ? `\n✅ Action: ${warning.action}` : ''}
+🕐 Time: ${new Date().toLocaleString()}`;
+
+    await this.sendAlert(message, 'warning');
+  }
+
+  /**
+   * Send daily summary
+   */
+  async sendDailySummary(summary: {
+    totalTrades: number;
+    successfulTrades: number;
+    totalPnL: number;
+    winRate: number;
+    bestTrade: string;
+    worstTrade: string;
+  }): Promise<void> {
+    const emoji = summary.totalPnL >= 0 ? '💰' : '📉';
+    const sign = summary.totalPnL >= 0 ? '+' : '';
+
+    const message = `📊 *DAILY SUMMARY* ${emoji}
+
+📈 Total Trades: ${summary.totalTrades}
+✅ Successful: ${summary.successfulTrades} (${summary.winRate.toFixed(1)}%)
+💰 Total P/L: ${sign}${summary.totalPnL.toFixed(4)} BNB
+🎯 Best Trade: ${summary.bestTrade}
+📉 Worst Trade: ${summary.worstTrade}
+🕐 Date: ${new Date().toLocaleDateString()}`;
+
+    await this.sendAlert(message, summary.totalPnL >= 0 ? 'profit' : 'info');
+  }
+
+  /**
+   * Send message to specific chat ID (for user-configured alerts)
+   */
+  async sendToChat(chatId: string, message: string, parseMode: 'Markdown' | 'HTML' = 'Markdown'): Promise<boolean> {
+    if (!this.bot) return false;
+
+    try {
+      await this.bot.telegram.sendMessage(chatId, message, {
+        parse_mode: parseMode
+      });
+      return true;
+    } catch (error) {
+      logger.error(`Failed to send message to chat ${chatId}: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Verify chat ID is valid
+   */
+  async verifyChatId(chatId: string): Promise<boolean> {
+    if (!this.bot) return false;
+
+    try {
+      await this.bot.telegram.getChat(chatId);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Subscribe a new user by chat ID
+   */
+  subscribeChatId(chatId: string): void {
+    this.state.subscribedUsers.add(chatId);
+    logger.info(`✅ Subscribed chat ID: ${chatId}`);
+  }
+
+  /**
+   * Unsubscribe user by chat ID
+   */
+  unsubscribeChatId(chatId: string): void {
+    this.state.subscribedUsers.delete(chatId);
+    logger.info(`❌ Unsubscribed chat ID: ${chatId}`);
+  }
+
+  /**
+   * Get list of subscribed chat IDs
+   */
+  getSubscribedChats(): string[] {
+    return Array.from(this.state.subscribedUsers);
+  }
+
+  /**
    * Get bot statistics
    */
   getStats() {
