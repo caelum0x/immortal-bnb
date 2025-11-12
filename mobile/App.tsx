@@ -16,6 +16,7 @@ import BotControlScreen from './src/screens/BotControlScreen';
 import PortfolioScreen from './src/screens/PortfolioScreen';
 import AnalyticsScreen from './src/screens/AnalyticsScreen';
 import OpportunitiesScreen from './src/screens/OpportunitiesScreen';
+import PolymarketWalletScreen from './src/screens/PolymarketWalletScreen';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -91,6 +92,11 @@ export default function App() {
           name="Opportunities"
           component={OpportunitiesScreen}
           options={{ title: 'Opportunities' }}
+        />
+        <Stack.Screen
+          name="PolymarketWallet"
+          component={PolymarketWalletScreen}
+          options={{ title: 'Polymarket Wallet' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
