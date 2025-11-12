@@ -297,6 +297,200 @@ app.get('/api/trading-stats', readLimiter, async (req: Request, res: Response) =
 });
 
 /**
+ * GET /api/analytics
+ * Get performance analytics with metrics
+ * Protected with: read rate limiting
+ */
+app.get('/api/analytics', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const timeframe = (req.query.timeframe as string) || '30d';
+
+    // Calculate time filter
+    const now = Date.now();
+    let startTime = 0;
+
+    switch (timeframe) {
+      case '7d':
+        startTime = now - (7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        startTime = now - (30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90d':
+        startTime = now - (90 * 24 * 60 * 60 * 1000);
+        break;
+      case 'all':
+      default:
+        startTime = 0;
+    }
+
+    // Fetch memories from Greenfield
+    const memoryIds = await fetchAllMemories();
+    const allMemories = await Promise.all(
+      memoryIds.map(id => fetchMemory(id))
+    );
+
+    // Filter by timeframe and remove nulls
+    const memories = allMemories.filter(m =>
+      m !== null && m.timestamp >= startTime
+    ) as any[];
+
+    // Calculate analytics
+    const completedTrades = memories.filter(m => m.outcome !== 'pending');
+    const winningTrades = completedTrades.filter(m => m.outcome === 'profit');
+    const losingTrades = completedTrades.filter(m => m.outcome === 'loss');
+    const breakEvenTrades = completedTrades.filter(m =>
+      m.profitLoss !== undefined && Math.abs(m.profitLoss) < 0.01
+    );
+
+    // Profit timeline
+    const profitTimeline: { date: string; profit: number }[] = [];
+    let cumulativeProfit = 0;
+
+    completedTrades
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach(trade => {
+        cumulativeProfit += trade.profitLoss || 0;
+        const date = new Date(trade.timestamp).toISOString().split('T')[0];
+        profitTimeline.push({ date, profit: cumulativeProfit });
+      });
+
+    // Trade distribution
+    const tradeDistribution = {
+      win: winningTrades.length,
+      loss: losingTrades.length,
+      breakeven: breakEvenTrades.length,
+    };
+
+    // Top performing tokens
+    const tokenProfits = new Map<string, { profit: number; trades: number }>();
+    completedTrades.forEach(trade => {
+      const existing = tokenProfits.get(trade.tokenSymbol) || { profit: 0, trades: 0 };
+      tokenProfits.set(trade.tokenSymbol, {
+        profit: existing.profit + (trade.profitLoss || 0),
+        trades: existing.trades + 1,
+      });
+    });
+
+    const topTokens = Array.from(tokenProfits.entries())
+      .map(([symbol, data]) => ({ symbol, ...data }))
+      .sort((a, b) => b.profit - a.profit)
+      .slice(0, 10);
+
+    // Performance metrics
+    const totalPL = completedTrades.reduce((sum, t) => sum + (t.profitLoss || 0), 0);
+    const wins = winningTrades.map(t => t.profitLoss || 0);
+    const losses = losingTrades.map(t => Math.abs(t.profitLoss || 0));
+
+    const avgWin = wins.length > 0 ? wins.reduce((a, b) => a + b, 0) / wins.length : 0;
+    const avgLoss = losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0;
+    const winRate = completedTrades.length > 0
+      ? (winningTrades.length / completedTrades.length) * 100
+      : 0;
+
+    const profitFactor = avgLoss > 0 ? avgWin / avgLoss : 0;
+
+    // Calculate Sharpe Ratio (simplified)
+    const returns = completedTrades.map(t => (t.profitLoss || 0));
+    const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
+    const variance = returns.length > 0
+      ? returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length
+      : 0;
+    const stdDev = Math.sqrt(variance);
+    const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) : 0;
+
+    // Max drawdown
+    let maxDrawdown = 0;
+    let peak = 0;
+    let runningPL = 0;
+
+    completedTrades
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach(trade => {
+        runningPL += trade.profitLoss || 0;
+        if (runningPL > peak) peak = runningPL;
+        const drawdown = ((peak - runningPL) / Math.max(peak, 1)) * 100;
+        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+      });
+
+    const performanceMetrics = {
+      totalReturn: totalPL,
+      sharpeRatio,
+      maxDrawdown,
+      winRate,
+      avgWin,
+      avgLoss,
+      profitFactor,
+    };
+
+    res.json({
+      profitTimeline,
+      tradeDistribution,
+      topTokens,
+      performanceMetrics,
+    });
+
+  } catch (error) {
+    logger.error(`API /analytics error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/positions
+ * Get active trading positions
+ * Protected with: read rate limiting
+ */
+app.get('/api/positions', readLimiter, async (req: Request, res: Response) => {
+  try {
+    // Get positions from BotState
+    const positions = BotState.getPositions();
+
+    res.json({
+      positions,
+      total: positions.length,
+      totalValue: positions.reduce((sum, p) => sum + p.value, 0),
+      totalPnL: positions.reduce((sum, p) => sum + p.pnl, 0),
+    });
+
+  } catch (error) {
+    logger.error(`API /positions error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/positions/:id/close
+ * Close a specific position
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/positions/:id/close', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Close position via BotState
+    const result = await BotState.closePosition(id);
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    logger.info(`✅ Position ${id} closed via API`);
+
+    res.json({
+      success: true,
+      message: 'Position closed successfully',
+      positionId: id,
+      trade: result.trade,
+    });
+
+  } catch (error) {
+    logger.error(`API /positions/:id/close error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * Health check
  * Protected with: health check rate limiting
  */
@@ -323,6 +517,9 @@ export function startAPIServer() {
     logger.info(`   GET  /api/memories`);
     logger.info(`   GET  /api/discover-tokens`);
     logger.info(`   GET  /api/trading-stats`);
+    logger.info(`   GET  /api/analytics`);
+    logger.info(`   GET  /api/positions`);
+    logger.info(`   POST /api/positions/:id/close`);
     logger.info(`   GET  /health`);
   });
 }
