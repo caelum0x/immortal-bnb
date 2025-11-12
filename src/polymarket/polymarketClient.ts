@@ -3,12 +3,14 @@
  *
  * Provides prediction market trading capabilities on Polygon network
  * Integrates with Polymarket's Central Limit Order Book
+ * Supports both Proxy (email-based) and Safe (browser wallet) wallets
  */
 
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
+import { UnifiedPolymarketWallet, WalletType } from './unifiedWalletManager';
 
 export interface PolymarketConfig {
   host: string;
@@ -54,6 +56,8 @@ export class PolymarketService {
   private config: PolymarketConfig;
   private wallet: ethers.Wallet;
   private provider: ethers.JsonRpcProvider;
+  private unifiedWallet: UnifiedPolymarketWallet | null = null;
+  private useUnifiedWallet: boolean = false;
 
   constructor() {
     this.config = {
@@ -70,6 +74,10 @@ export class PolymarketService {
 
     if (this.config.enabled) {
       this.initializeClient();
+      // Initialize unified wallet if wallet type is configured
+      if (CONFIG.POLYMARKET_WALLET_TYPE) {
+        this.initializeUnifiedWallet();
+      }
     }
   }
 
@@ -94,6 +102,55 @@ export class PolymarketService {
       logger.error('Failed to initialize Polymarket client:', error);
       throw error;
     }
+  }
+
+  /**
+   * Initialize Unified Wallet Manager (Proxy or Safe)
+   */
+  private async initializeUnifiedWallet(): Promise<void> {
+    try {
+      const walletType = CONFIG.POLYMARKET_WALLET_TYPE;
+      this.unifiedWallet = new UnifiedPolymarketWallet(walletType);
+      await this.unifiedWallet.initialize();
+      this.useUnifiedWallet = true;
+      logger.info(`✅ Unified Polymarket wallet initialized (${walletType})`);
+    } catch (error) {
+      logger.error('Failed to initialize unified wallet:', error);
+      logger.info('Falling back to standard CLOB client');
+      this.useUnifiedWallet = false;
+    }
+  }
+
+  /**
+   * Switch wallet type (proxy or safe)
+   */
+  async switchWalletType(newType: WalletType): Promise<void> {
+    if (!this.unifiedWallet) {
+      throw new Error('Unified wallet not initialized');
+    }
+    await this.unifiedWallet.switchWalletType(newType);
+    logger.info(`✅ Switched to ${newType} wallet`);
+  }
+
+  /**
+   * Get current wallet type
+   */
+  getCurrentWalletType(): WalletType | null {
+    return this.unifiedWallet?.getWalletType() || null;
+  }
+
+  /**
+   * Get wallet information
+   */
+  getWalletInfo(): any {
+    if (this.useUnifiedWallet && this.unifiedWallet) {
+      return this.unifiedWallet.getInfo();
+    }
+    return {
+      walletType: 'standard',
+      address: this.wallet.address,
+      isInitialized: this.client !== null,
+    };
   }
 
   /**

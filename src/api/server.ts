@@ -777,6 +777,91 @@ app.get('/api/polymarket/orderbook/:marketId', async (req: Request, res: Respons
 });
 
 // =============================================================================
+// POLYMARKET WALLET CONFIGURATION ENDPOINTS
+// =============================================================================
+
+// Get wallet information
+app.get('/api/polymarket/wallet/info', async (req: Request, res: Response) => {
+  try {
+    const { polymarketService } = await import('../polymarket/polymarketClient');
+
+    const walletInfo = polymarketService.getWalletInfo();
+    const currentType = polymarketService.getCurrentWalletType();
+
+    res.json({
+      success: true,
+      walletInfo,
+      currentWalletType: currentType,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching wallet info:', error);
+    res.status(500).json({
+      error: 'Failed to fetch wallet information',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Switch wallet type (proxy or safe)
+app.post('/api/polymarket/wallet/switch', async (req: Request, res: Response) => {
+  try {
+    const { walletType } = req.body;
+
+    if (!walletType || !['proxy', 'safe'].includes(walletType)) {
+      return res.status(400).json({
+        error: 'Invalid wallet type. Must be "proxy" or "safe"',
+      });
+    }
+
+    const { polymarketService } = await import('../polymarket/polymarketClient');
+    await polymarketService.switchWalletType(walletType);
+
+    res.json({
+      success: true,
+      message: `Successfully switched to ${walletType} wallet`,
+      currentWalletType: walletType,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error switching wallet type:', error);
+    res.status(500).json({
+      error: 'Failed to switch wallet type',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get wallet type comparison and recommendations
+app.get('/api/polymarket/wallet/compare', async (req: Request, res: Response) => {
+  try {
+    const { UnifiedPolymarketWallet } = await import('../polymarket/unifiedWalletManager');
+
+    const comparison = UnifiedPolymarketWallet.compareWalletTypes();
+    const recommendedForSimple = UnifiedPolymarketWallet.getRecommendedWalletType('simple');
+    const recommendedForAdvanced = UnifiedPolymarketWallet.getRecommendedWalletType('advanced');
+    const recommendedForSecurity = UnifiedPolymarketWallet.getRecommendedWalletType('security');
+
+    res.json({
+      success: true,
+      comparison,
+      recommendations: {
+        simple: recommendedForSimple,
+        advanced: recommendedForAdvanced,
+        security: recommendedForSecurity,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching wallet comparison:', error);
+    res.status(500).json({
+      error: 'Failed to fetch wallet comparison',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
 // POLYMARKET GREENFIELD STORAGE ENDPOINTS
 // =============================================================================
 
