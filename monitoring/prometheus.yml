@@ -1,0 +1,48 @@
+# Prometheus Configuration for Immortal AI Trading Bot
+
+global:
+  scrape_interval: 15s # Scrape targets every 15 seconds
+  evaluation_interval: 15s # Evaluate rules every 15 seconds
+  external_labels:
+    monitor: 'immortal-trading-bot'
+    environment: 'production'
+
+# Scrape configurations
+scrape_configs:
+  # Backend API (TypeScript)
+  - job_name: 'backend-api'
+    static_configs:
+      - targets: ['backend:3001']
+        labels:
+          service: 'backend'
+          component: 'api-gateway'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Python Microservice
+  - job_name: 'python-api'
+    static_configs:
+      - targets: ['python-api:5000']
+        labels:
+          service: 'python-api'
+          component: 'polymarket-agents'
+    metrics_path: '/health'
+    scrape_interval: 10s
+
+  # Node Exporter (system metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+          component: 'system-metrics'
+
+# Alerting rules
+rule_files:
+  - 'alerts.yml'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']

@@ -6,6 +6,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { createServer } from 'http';
 import { CONFIG } from '../config';
 import { logger } from '../utils/logger';
@@ -20,8 +21,24 @@ import { getAIDecision, analyzeSentiment } from '../ai/llmInterface';
 import { initializeWebSocketService, getWebSocketService } from '../services/websocket.js';
 import { getPythonBridge } from '../services/pythonBridge.js';
 
+// Security middleware imports
+import { authenticate, login } from '../middleware/auth.js';
+import { apiLimiter, strictLimiter, authLimiter, tradingLimiter, readLimiter } from '../middleware/rateLimiting.js';
+import {
+  validateTradingDecision,
+  validateMemoryQuery,
+  validateTradeExecution,
+  validateWalletAddress
+} from '../middleware/validation.js';
+
+// Monitoring imports
+import { register, metricsMiddleware } from '../monitoring/metrics.js';
+
 const app = express();
 const port = CONFIG.API_PORT;
+
+// Security: Helmet for HTTP headers
+app.use(helmet());
 
 // Middleware
 app.use(cors({
@@ -33,6 +50,12 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// Monitoring: Prometheus metrics
+app.use(metricsMiddleware);
+
+// Apply general API rate limiting
+app.use('/api/', apiLimiter);
 
 // Initialize AI systems (will be shared across endpoints)
 let immortalAgent: ImmortalAIAgent;
@@ -51,6 +74,17 @@ function initializeAISystem() {
   }
 }
 
+// =============================================================================
+// AUTHENTICATION ENDPOINTS
+// =============================================================================
+
+// Login endpoint (wallet-based authentication)
+app.post('/api/auth/login', authLimiter, login);
+
+// =============================================================================
+// END AUTHENTICATION ENDPOINTS
+// =============================================================================
+
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
@@ -61,6 +95,16 @@ app.get('/api/health', (req: Request, res: Response) => {
     server: 'Immortal AI Trading Bot API',
     version: '1.0.0',
   });
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (req: Request, res: Response) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (error) {
+    res.status(500).end(error);
+  }
 });
 
 // Connection test endpoint for frontend
@@ -1262,7 +1306,7 @@ app.get("/api/memory/analytics", async (req, res) => {
 });
 
 // Query unified memories with filters
-app.post("/api/memory/query", async (req, res) => {
+app.post("/api/memory/query", readLimiter, validateMemoryQuery, async (req, res) => {
   try {
     const filters = req.body;
     const { queryUnifiedMemories } = await import("../blockchain/unifiedMemoryStorage.js");
@@ -1321,7 +1365,7 @@ app.post("/api/memory/store", async (req, res) => {
 // =============================================================================
 
 // Get AI orchestrator decision
-app.post("/api/orchestrator/decision", async (req, res) => {
+app.post("/api/orchestrator/decision", tradingLimiter, validateTradingDecision, async (req, res) => {
   try {
     const request = req.body;
     const { getOrchestrator } = await import("../ai/orchestrator.js");

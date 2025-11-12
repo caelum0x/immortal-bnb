@@ -1,0 +1,94 @@
+# Prometheus Alert Rules for Immortal AI Trading Bot
+
+groups:
+  - name: api_alerts
+    interval: 30s
+    rules:
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status_code=~"5.."}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} errors/sec on {{ $labels.route }}"
+
+      # API response time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API response time is high"
+          description: "95th percentile response time is {{ $value }}s"
+
+  - name: trading_alerts
+    interval: 30s
+    rules:
+      # Low balance warning
+      - alert: LowWalletBalance
+        expr: wallet_balance < 0.1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wallet balance is low"
+          description: "{{ $labels.chain }} {{ $labels.token }} balance is {{ $value }}"
+
+      # High trade failure rate
+      - alert: HighTradeFailureRate
+        expr: rate(trades_total{outcome="failed"}[10m]) / rate(trades_total[10m]) > 0.3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High trade failure rate"
+          description: "Trade failure rate is {{ $value }}% on {{ $labels.platform }}"
+
+  - name: ai_alerts
+    interval: 30s
+    rules:
+      # Low AI confidence
+      - alert: LowAIConfidence
+        expr: histogram_quantile(0.5, rate(ai_decision_confidence_bucket[10m])) < 0.6
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "AI confidence is low"
+          description: "Median AI confidence is {{ $value }} for {{ $labels.agent_type }}"
+
+  - name: system_alerts
+    interval: 30s
+    rules:
+      # Python API down
+      - alert: PythonAPIDown
+        expr: python_api_health == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Python API is unhealthy"
+          description: "Python microservice is not responding"
+
+      # Memory sync issues
+      - alert: MemorySyncBacklog
+        expr: memory_sync_pending > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory sync backlog is high"
+          description: "{{ $value }} memories pending synchronization"
+
+      # No WebSocket connections
+      - alert: NoWebSocketConnections
+        expr: websocket_connections_active == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "No active WebSocket connections"
+          description: "Frontend may not be receiving real-time updates"
