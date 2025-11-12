@@ -1,0 +1,87 @@
+# Dockerfile for Immortal AI Trading Bot Backend (TypeScript/Node.js)
+# Multi-stage build for optimized production image
+
+# ============================================================================
+# Stage 1: Dependencies
+# ============================================================================
+FROM node:20-alpine AS deps
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    git \
+    curl
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json bun.lock* ./
+
+# Install dependencies
+RUN npm ci --only=production && \
+    npm cache clean --force
+
+# ============================================================================
+# Stage 2: Builder
+# ============================================================================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy source code
+COPY . .
+
+# Build TypeScript code
+RUN npm run build || echo "Build step optional - using ts-node runtime"
+
+# ============================================================================
+# Stage 3: Runtime
+# ============================================================================
+FROM node:20-alpine AS runtime
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    ca-certificates \
+    tzdata
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+WORKDIR /app
+
+# Copy node_modules from deps
+COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+
+# Copy built application (or source if no build)
+COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist 2>/dev/null || true
+COPY --from=builder --chown=nodejs:nodejs /app/src ./src
+COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
+COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
+
+# Create logs directory
+RUN mkdir -p /app/logs && chown -R nodejs:nodejs /app/logs
+
+# Switch to non-root user
+USER nodejs
+
+# Expose API port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:3001/health || exit 1
+
+# Environment
+ENV NODE_ENV=production \
+    API_PORT=3001 \
+    LOG_LEVEL=info
+
+# Start command - use ts-node if no build output, otherwise use dist
+CMD ["sh", "-c", "if [ -d dist ]; then node dist/api/server.js; else npx ts-node src/api/server.ts; fi"]

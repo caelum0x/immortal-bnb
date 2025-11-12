@@ -3,13 +3,42 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+
+  // Enable standalone output for Docker (smaller image size)
+  output: 'standalone',
+
+  // Webpack configuration for Web3 libraries
+  webpack: (config) => {
+    config.resolve.fallback = {
+      fs: false,
+      net: false,
+      tls: false,
+      crypto: false,
+      stream: false,
+      http: false,
+      https: false,
+      zlib: false,
+      path: false,
+      os: false
+    };
+
+    // Handle ESM modules
+    config.externals.push('pino-pretty', 'lokijs', 'encoding');
+
+    return config;
+  },
+
+  // Image optimization
   images: {
     domains: [
       'raw.githubusercontent.com',
       'assets.coingecko.com',
-      'logos.covalenthq.com'
+      'logos.covalenthq.com',
+      'localhost'
     ],
   },
+
+  // CORS headers
   async headers() {
     return [
       {
@@ -22,7 +51,13 @@ const nextConfig: NextConfig = {
         ]
       }
     ];
-  }
+  },
+
+  // Environment variables exposed to browser
+  env: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001',
+  },
 };
 
 export default nextConfig;

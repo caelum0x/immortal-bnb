@@ -6,6 +6,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { logger } from '../utils/logger.js';
+import { polymarketRealtimeService } from '../polymarket/realtimeDataService.js';
 
 export interface TradeExecutedEvent {
     type: 'trade';
@@ -76,6 +77,7 @@ export type WebSocketEvent =
 export class WebSocketService {
     private io: SocketIOServer;
     private connectedClients: Map<string, Socket> = new Map();
+    private polymarketIntegrated: boolean = false;
 
     constructor(httpServer: HTTPServer) {
         this.io = new SocketIOServer(httpServer, {
@@ -93,6 +95,7 @@ export class WebSocketService {
         });
 
         this.setupEventHandlers();
+        this.setupPolymarketIntegration();
         logger.info('🔌 WebSocket service initialized');
     }
 
@@ -266,11 +269,185 @@ export class WebSocketService {
     }
 
     /**
+     * Setup Polymarket real-time data integration
+     */
+    private setupPolymarketIntegration(): void {
+        if (this.polymarketIntegrated) return;
+
+        try {
+            // Subscribe to Polymarket real-time events
+            polymarketRealtimeService.on('connected', () => {
+                logger.info('✅ Polymarket real-time service connected');
+                this.broadcastPolymarketStatus('connected');
+            });
+
+            polymarketRealtimeService.on('disconnected', () => {
+                logger.warn('⚠️  Polymarket real-time service disconnected');
+                this.broadcastPolymarketStatus('disconnected');
+            });
+
+            // Market price changes
+            polymarketRealtimeService.on('clob_market:price_change', (data: any) => {
+                this.io.emit('polymarket_price_change', {
+                    type: 'price_change',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // Orderbook updates
+            polymarketRealtimeService.on('clob_market:agg_orderbook', (data: any) => {
+                this.io.emit('polymarket_orderbook', {
+                    type: 'orderbook',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // Last trade prices
+            polymarketRealtimeService.on('clob_market:last_trade_price', (data: any) => {
+                this.io.emit('polymarket_last_trade', {
+                    type: 'last_trade',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // User orders
+            polymarketRealtimeService.on('clob_user:order', (data: any) => {
+                this.io.emit('polymarket_user_order', {
+                    type: 'user_order',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // User trades
+            polymarketRealtimeService.on('clob_user:trade', (data: any) => {
+                this.io.emit('polymarket_user_trade', {
+                    type: 'user_trade',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // Trading activity
+            polymarketRealtimeService.on('activity:trades', (data: any) => {
+                this.io.emit('polymarket_trade_activity', {
+                    type: 'trade_activity',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // Crypto prices
+            polymarketRealtimeService.on('crypto_prices:update', (data: any) => {
+                this.io.emit('crypto_price_update', {
+                    type: 'crypto_price',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // Equity prices
+            polymarketRealtimeService.on('equity_prices:update', (data: any) => {
+                this.io.emit('equity_price_update', {
+                    type: 'equity_price',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            // Market created/resolved
+            polymarketRealtimeService.on('clob_market:market_created', (data: any) => {
+                this.io.emit('polymarket_market_created', {
+                    type: 'market_created',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            polymarketRealtimeService.on('clob_market:market_resolved', (data: any) => {
+                this.io.emit('polymarket_market_resolved', {
+                    type: 'market_resolved',
+                    data,
+                    timestamp: Date.now(),
+                });
+            });
+
+            this.polymarketIntegrated = true;
+            logger.info('✅ Polymarket real-time integration setup complete');
+        } catch (error) {
+            logger.error('Error setting up Polymarket integration:', error);
+        }
+    }
+
+    /**
+     * Broadcast Polymarket connection status
+     */
+    private broadcastPolymarketStatus(status: 'connected' | 'disconnected'): void {
+        this.io.emit('polymarket_status', {
+            status,
+            timestamp: Date.now(),
+        });
+    }
+
+    /**
+     * Start Polymarket real-time data stream
+     */
+    startPolymarketStream(options?: {
+        tokenIds?: string[];
+        marketSlugs?: string[];
+        cryptoSymbols?: string[];
+        equitySymbols?: string[];
+    }): void {
+        if (!polymarketRealtimeService.isConnected()) {
+            polymarketRealtimeService.connect();
+        }
+
+        // Subscribe to requested data streams
+        if (options?.tokenIds && options.tokenIds.length > 0) {
+            polymarketRealtimeService.subscribeToMarketPrices(options.tokenIds);
+            polymarketRealtimeService.subscribeToOrderbook(options.tokenIds);
+            polymarketRealtimeService.subscribeToLastTrades(options.tokenIds);
+        }
+
+        if (options?.marketSlugs && options.marketSlugs.length > 0) {
+            options.marketSlugs.forEach((slug) => {
+                polymarketRealtimeService.subscribeToTradingActivity(slug);
+            });
+        }
+
+        if (options?.cryptoSymbols && options.cryptoSymbols.length > 0) {
+            options.cryptoSymbols.forEach((symbol) => {
+                polymarketRealtimeService.subscribeToCryptoPrice(symbol);
+            });
+        }
+
+        if (options?.equitySymbols && options.equitySymbols.length > 0) {
+            options.equitySymbols.forEach((symbol) => {
+                polymarketRealtimeService.subscribeToEquityPrice(symbol);
+            });
+        }
+
+        logger.info('📡 Polymarket real-time data stream started');
+    }
+
+    /**
+     * Stop Polymarket real-time data stream
+     */
+    stopPolymarketStream(): void {
+        polymarketRealtimeService.disconnect();
+        logger.info('🔌 Polymarket real-time data stream stopped');
+    }
+
+    /**
      * Close WebSocket server
      */
     close(): Promise<void> {
         return new Promise((resolve) => {
             logger.info('🔌 Closing WebSocket service...');
+            this.stopPolymarketStream();
             this.io.close(() => {
                 logger.info('✅ WebSocket service closed');
                 resolve();
