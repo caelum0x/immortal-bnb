@@ -2315,6 +2315,575 @@ app.post("/api/polymarket/place-order", tradingLimiter, async (req, res) => {
   }
 });
 
+// Advanced Polymarket Endpoints (using submodules)
+
+/**
+ * POST /api/polymarket/split-position - Split USDC into conditional tokens
+ */
+app.post("/api/polymarket/split-position", tradingLimiter, async (req, res) => {
+  try {
+    const { conditionId, amount, negRisk = false } = req.body;
+
+    if (!conditionId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "conditionId and amount are required",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.splitPosition({
+      conditionId,
+      amount,
+      negRisk,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position split successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error splitting position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to split position",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/merge-position - Merge conditional tokens back to USDC
+ */
+app.post("/api/polymarket/merge-position", tradingLimiter, async (req, res) => {
+  try {
+    const { conditionId, amount, negRisk = false } = req.body;
+
+    if (!conditionId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "conditionId and amount are required",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.mergePosition({
+      conditionId,
+      amount,
+      negRisk,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position merged successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error merging position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to merge position",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/redeem-position - Redeem winning positions
+ */
+app.post("/api/polymarket/redeem-position", tradingLimiter, async (req, res) => {
+  try {
+    const { conditionId, negRisk = false, amounts } = req.body;
+
+    if (!conditionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field",
+        message: "conditionId is required",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.redeemPosition({
+      conditionId,
+      negRisk,
+      amounts,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position redeemed successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error redeeming position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to redeem position",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/convert-position - Convert positions between outcomes
+ */
+app.post("/api/polymarket/convert-position", tradingLimiter, async (req, res) => {
+  try {
+    const { marketId, questionIds, amount } = req.body;
+
+    if (!marketId || !questionIds || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "marketId, questionIds, and amount are required",
+      });
+    }
+
+    if (!Array.isArray(questionIds)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid questionIds",
+        message: "questionIds must be an array",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.convertPosition({
+      marketId,
+      questionIds,
+      amount,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position converted successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error converting position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to convert position",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/approve-tokens - Approve tokens for trading
+ */
+app.post("/api/polymarket/approve-tokens", tradingLimiter, async (req, res) => {
+  try {
+    const { token, spender, amount, approved } = req.body;
+
+    if (!token || !spender) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "token and spender are required",
+      });
+    }
+
+    if (!['USDC', 'CTF', 'OUTCOME'].includes(token)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid token",
+        message: "token must be USDC, CTF, or OUTCOME",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.approveTokens({
+      token,
+      spender,
+      amount,
+      approved,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Tokens approved successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error approving tokens:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to approve tokens",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/transfer-tokens - Transfer tokens
+ */
+app.post("/api/polymarket/transfer-tokens", tradingLimiter, async (req, res) => {
+  try {
+    const { tokenType, to, amount, tokenId } = req.body;
+
+    if (!tokenType || !to || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "tokenType, to, and amount are required",
+      });
+    }
+
+    if (!['USDC', 'OUTCOME'].includes(tokenType)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid tokenType",
+        message: "tokenType must be USDC or OUTCOME",
+      });
+    }
+
+    if (tokenType === 'OUTCOME' && !tokenId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing tokenId",
+        message: "tokenId is required for OUTCOME token transfers",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.transferTokens({
+      tokenType,
+      to,
+      amount,
+      tokenId,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Tokens transferred successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error transferring tokens:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to transfer tokens",
+      message: error.message,
+    });
+  }
+});
+
+// API Key Management Endpoints
+
+/**
+ * POST /api/polymarket/api-keys/create - Create new API key
+ */
+app.post("/api/polymarket/api-keys/create", async (req, res) => {
+  try {
+    const { nonce } = req.body;
+
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.createApiKey(nonce);
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        secret: keyInfo.secret,
+        passphrase: keyInfo.passphrase,
+        created: keyInfo.created,
+      },
+      message: "API key created successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error creating API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create API key",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/api-keys/derive - Derive existing API key
+ */
+app.post("/api/polymarket/api-keys/derive", async (req, res) => {
+  try {
+    const { nonce } = req.body;
+
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.deriveApiKey(nonce);
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        secret: keyInfo.secret,
+        passphrase: keyInfo.passphrase,
+      },
+      message: "API key derived successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error deriving API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to derive API key",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/api-keys/create-or-derive - Create or derive API key
+ */
+app.post("/api/polymarket/api-keys/create-or-derive", async (req, res) => {
+  try {
+    const { nonce } = req.body;
+
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.createOrDeriveApiKey(nonce);
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        secret: keyInfo.secret,
+        passphrase: keyInfo.passphrase,
+      },
+      message: "API key ready",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error creating/deriving API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create/derive API key",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/api-keys - Get all API keys
+ */
+app.get("/api/polymarket/api-keys", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keys = await apiKeyManager.getApiKeys();
+
+    res.json({
+      success: true,
+      keys: keys.apiKeys || [],
+      count: keys.apiKeys?.length || 0,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error fetching API keys:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch API keys",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/polymarket/api-keys - Delete API key
+ */
+app.delete("/api/polymarket/api-keys", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    await apiKeyManager.deleteApiKey();
+
+    res.json({
+      success: true,
+      message: "API key deleted successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error deleting API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete API key",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/api-keys/builder/create - Create builder API key
+ */
+app.post("/api/polymarket/api-keys/builder/create", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.createBuilderApiKey();
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        created: keyInfo.created,
+      },
+      message: "Builder API key created successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error creating builder API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create builder API key",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/api-keys/builder - Get builder API keys
+ */
+app.get("/api/polymarket/api-keys/builder", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keys = await apiKeyManager.getBuilderApiKeys();
+
+    res.json({
+      success: true,
+      keys,
+      count: keys.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error fetching builder API keys:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch builder API keys",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/polymarket/api-keys/builder - Revoke builder API key
+ */
+app.delete("/api/polymarket/api-keys/builder", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    await apiKeyManager.revokeBuilderApiKey();
+
+    res.json({
+      success: true,
+      message: "Builder API key revoked successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error revoking builder API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to revoke builder API key",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/balances - Get USDC and outcome token balances
+ */
+app.get("/api/polymarket/balances", async (req, res) => {
+  try {
+    const { tokenId } = req.query;
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const usdcBalance = await positionManager.getUSDCBalance();
+
+    const balances: any = {
+      usdc: usdcBalance,
+      wallet: positionManager.getWalletAddress(),
+    };
+
+    if (tokenId) {
+      const outcomeBalance = await positionManager.getOutcomeTokenBalance(tokenId as string);
+      balances.outcomeTokens = {
+        [tokenId as string]: outcomeBalance,
+      };
+    }
+
+    res.json({
+      success: true,
+      balances,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error fetching balances:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch balances",
+      message: error.message,
+    });
+  }
+});
+
 // Alias endpoints for backward compatibility
 
 /**
