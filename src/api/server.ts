@@ -2884,6 +2884,161 @@ app.get("/api/polymarket/balances", async (req, res) => {
   }
 });
 
+// Real-Time Data Endpoints
+
+/**
+ * POST /api/polymarket/realtime/connect - Connect to real-time data feed
+ */
+app.post("/api/polymarket/realtime/connect", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.connect();
+
+    res.json({
+      success: true,
+      message: "Connecting to Polymarket real-time data feed",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error connecting to real-time feed:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to connect to real-time feed",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/realtime/disconnect - Disconnect from real-time data feed
+ */
+app.post("/api/polymarket/realtime/disconnect", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.disconnect();
+
+    res.json({
+      success: true,
+      message: "Disconnected from Polymarket real-time data feed",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error disconnecting from real-time feed:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to disconnect from real-time feed",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/realtime/subscribe - Subscribe to real-time topics
+ */
+app.post("/api/polymarket/realtime/subscribe", async (req, res) => {
+  try {
+    const { subscriptions } = req.body;
+
+    if (!subscriptions || !Array.isArray(subscriptions)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid subscriptions",
+        message: "subscriptions must be an array",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.subscribe(subscriptions);
+
+    res.json({
+      success: true,
+      message: `Subscribed to ${subscriptions.length} topics`,
+      subscriptions: subscriptions.map(s => ({
+        topic: s.topic,
+        type: s.type,
+        filters: s.filters,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error subscribing to topics:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to subscribe to topics",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/realtime/unsubscribe - Unsubscribe from real-time topics
+ */
+app.post("/api/polymarket/realtime/unsubscribe", async (req, res) => {
+  try {
+    const { subscriptions } = req.body;
+
+    if (!subscriptions || !Array.isArray(subscriptions)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid subscriptions",
+        message: "subscriptions must be an array",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.unsubscribe(subscriptions);
+
+    res.json({
+      success: true,
+      message: `Unsubscribed from ${subscriptions.length} topics`,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error unsubscribing from topics:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to unsubscribe from topics",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/status - Get real-time feed connection status
+ */
+app.get("/api/polymarket/realtime/status", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const isConnected = realTimeService.isConnected();
+
+    res.json({
+      success: true,
+      status: {
+        connected: isConnected,
+        state: isConnected ? 'CONNECTED' : 'DISCONNECTED',
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting real-time status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get real-time status",
+      message: error.message,
+    });
+  }
+});
+
 // Alias endpoints for backward compatibility
 
 /**
