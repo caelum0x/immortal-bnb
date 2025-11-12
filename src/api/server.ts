@@ -329,6 +329,15 @@ export function startAPIServer() {
   const wsService = initializeWebSocketService(httpServer);
   logger.info('🔌 WebSocket service initialized');
 
+  // Initialize Polymarket Real-Time Service
+  try {
+    const { initializeRealTimeService } = await import('../polymarket/realTimeService.js');
+    initializeRealTimeService();
+    logger.info('📡 Polymarket real-time service connected');
+  } catch (error) {
+    logger.warn('Could not initialize Polymarket real-time service:', error);
+  }
+
   // Start listening
   httpServer.listen(port, () => {
     logger.info(`🌐 API Server running on http://localhost:${port}`);
@@ -3034,6 +3043,324 @@ app.get("/api/polymarket/realtime/status", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to get real-time status",
+      message: error.message,
+    });
+  }
+});
+
+// Market Intelligence Data Endpoints
+
+/**
+ * GET /api/polymarket/realtime/intelligence - Get all market intelligence
+ */
+app.get("/api/polymarket/realtime/intelligence", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const intelligence = realTimeService.getMarketIntelligence();
+
+    // Convert Maps to objects for JSON serialization
+    const response = {
+      success: true,
+      data: {
+        latestTrades: Object.fromEntries(intelligence.latestTrades),
+        cryptoPrices: Object.fromEntries(intelligence.cryptoPrices),
+        equityPrices: Object.fromEntries(intelligence.equityPrices),
+        orderbooks: Object.fromEntries(intelligence.orderbooks),
+        lastTradePrices: Object.fromEntries(intelligence.lastTradePrices),
+        userOrders: Object.fromEntries(intelligence.userOrders),
+        userTrades: Object.fromEntries(intelligence.userTrades),
+      },
+      stats: {
+        totalTrades: intelligence.latestTrades.size,
+        totalCryptoPrices: intelligence.cryptoPrices.size,
+        totalEquityPrices: intelligence.equityPrices.size,
+        totalOrderbooks: intelligence.orderbooks.size,
+        totalUserOrders: intelligence.userOrders.size,
+        totalUserTrades: intelligence.userTrades.size,
+      },
+      timestamp: Date.now(),
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error("Error getting market intelligence:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get market intelligence",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/trades/:conditionId - Get latest trade for a market
+ */
+app.get("/api/polymarket/realtime/trades/:conditionId", async (req, res) => {
+  try {
+    const { conditionId } = req.params;
+
+    if (!conditionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing conditionId parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const trade = realTimeService.getLatestTrade(conditionId);
+
+    if (!trade) {
+      return res.status(404).json({
+        success: false,
+        error: "No trade found for this condition ID",
+        conditionId,
+      });
+    }
+
+    res.json({
+      success: true,
+      trade,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting latest trade:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get latest trade",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/crypto-prices - Get all crypto prices
+ */
+app.get("/api/polymarket/realtime/crypto-prices", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const cryptoPrices = realTimeService.getAllCryptoPrices();
+
+    res.json({
+      success: true,
+      count: cryptoPrices.size,
+      prices: Object.fromEntries(cryptoPrices),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting crypto prices:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get crypto prices",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/crypto-prices/:symbol - Get specific crypto price
+ */
+app.get("/api/polymarket/realtime/crypto-prices/:symbol", async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing symbol parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const price = realTimeService.getCryptoPrice(symbol.toUpperCase());
+
+    if (!price) {
+      return res.status(404).json({
+        success: false,
+        error: "No price data found for this symbol",
+        symbol: symbol.toUpperCase(),
+      });
+    }
+
+    res.json({
+      success: true,
+      price,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting crypto price:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get crypto price",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/equity-prices - Get all equity prices
+ */
+app.get("/api/polymarket/realtime/equity-prices", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const equityPrices = realTimeService.getAllEquityPrices();
+
+    res.json({
+      success: true,
+      count: equityPrices.size,
+      prices: Object.fromEntries(equityPrices),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting equity prices:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get equity prices",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/equity-prices/:symbol - Get specific equity price
+ */
+app.get("/api/polymarket/realtime/equity-prices/:symbol", async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing symbol parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const price = realTimeService.getEquityPrice(symbol.toUpperCase());
+
+    if (!price) {
+      return res.status(404).json({
+        success: false,
+        error: "No price data found for this symbol",
+        symbol: symbol.toUpperCase(),
+      });
+    }
+
+    res.json({
+      success: true,
+      price,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting equity price:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get equity price",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/orderbook/:market - Get orderbook for a market
+ */
+app.get("/api/polymarket/realtime/orderbook/:market", async (req, res) => {
+  try {
+    const { market } = req.params;
+
+    if (!market) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing market parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const orderbook = realTimeService.getOrderbook(market);
+
+    if (!orderbook) {
+      return res.status(404).json({
+        success: false,
+        error: "No orderbook data found for this market",
+        market,
+      });
+    }
+
+    res.json({
+      success: true,
+      orderbook,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting orderbook:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get orderbook",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/user-orders - Get user orders
+ */
+app.get("/api/polymarket/realtime/user-orders", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const userOrders = realTimeService.getUserOrders();
+
+    res.json({
+      success: true,
+      count: userOrders.size,
+      orders: Object.fromEntries(userOrders),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting user orders:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get user orders",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/user-trades - Get user trades
+ */
+app.get("/api/polymarket/realtime/user-trades", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const userTrades = realTimeService.getUserTrades();
+
+    res.json({
+      success: true,
+      count: userTrades.size,
+      trades: Object.fromEntries(userTrades),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting user trades:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get user trades",
       message: error.message,
     });
   }
