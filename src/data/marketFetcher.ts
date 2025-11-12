@@ -471,10 +471,32 @@ export class MarketDataFetcher {
 // Export singleton instance
 export const marketDataFetcher = new MarketDataFetcher();
 
+/**
+ * Get current token price
+ */
+export async function getTokenPrice(tokenAddress: string): Promise<number> {
+  try {
+    const tokenData = await getTokenData(tokenAddress);
+    return tokenData?.price || 0;
+  } catch (error) {
+    logger.error(`Failed to get price for token ${tokenAddress}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Get detailed token analytics
+ */
+export async function getTokenAnalytics(tokenAddress: string): Promise<TokenData | null> {
+  return await getTokenData(tokenAddress);
+}
+
 export default {
   getTokenData,
   getMultipleTokensData,
   getTrendingTokens,
   calculateBuySellPressure,
   hasSufficientLiquidity,
+  getTokenPrice,
+  getTokenAnalytics,
 };

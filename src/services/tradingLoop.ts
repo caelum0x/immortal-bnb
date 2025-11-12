@@ -15,9 +15,10 @@ import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
 import { ImmortalAIAgent } from '../ai/immortalAgent';
 import { PositionManager } from './positionManager';
-import { TelegramBot } from '../alerts/telegramBot';
+import { TelegramBotManager } from '../alerts/telegramBot';
 import { getTrendingTokens, getTokenAnalytics } from '../data/marketFetcher';
 import { executeTrade, getWalletBalance } from '../blockchain/tradeExecutor';
+import type { TradeResult } from '../blockchain/tradeExecutor';
 import { ethers } from 'ethers';
 
 export interface TradingLoopConfig {
@@ -60,7 +61,7 @@ export interface Decision {
 export class TradingLoop {
   private agent: ImmortalAIAgent;
   private positionManager: PositionManager;
-  private telegram: TelegramBot;
+  private telegram: TelegramBotManager;
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private config: TradingLoopConfig;
@@ -79,7 +80,7 @@ export class TradingLoop {
 
     this.agent = new ImmortalAIAgent();
     this.positionManager = new PositionManager();
-    this.telegram = new TelegramBot();
+    this.telegram = new TelegramBotManager();
 
     logger.info('🔧 Trading Loop initialized', { config: this.config });
   }
@@ -128,12 +129,12 @@ export class TradingLoop {
           if (this.errors >= 5) {
             logger.error('❌ Too many errors, stopping trading loop');
             await this.stop();
-            await this.telegram.sendMessage('🚨 Trading loop stopped due to errors');
+            await this.telegram.sendAlert('🚨 Trading loop stopped due to errors');
           }
         }
       }, this.config.interval);
 
-      await this.telegram.sendMessage(
+      await this.telegram.sendAlert(
         `🤖 Immortal Bot Started\n` +
         `Network: ${CONFIG.TRADING_NETWORK}\n` +
         `Interval: ${this.config.interval / 60000} minutes\n` +
@@ -143,7 +144,7 @@ export class TradingLoop {
       logger.info('✅ Trading Loop started successfully');
     } catch (error) {
       logger.error('Failed to start trading loop:', error);
-      await this.telegram.sendMessage(`❌ Failed to start: ${(error as Error).message}`);
+      await this.telegram.sendAlert(`❌ Failed to start: ${(error as Error).message}`);
       throw error;
     }
   }
@@ -170,7 +171,7 @@ export class TradingLoop {
     await this.positionManager.stopMonitoring();
 
     const stats = await this.positionManager.getPerformanceStats();
-    await this.telegram.sendMessage(
+    await this.telegram.sendAlert(
       `⏸️ Immortal Bot Stopped\n` +
       `Cycles: ${this.cycleCount}\n` +
       `Win Rate: ${stats.winRate.toFixed(1)}%\n` +
@@ -237,6 +238,8 @@ export class TradingLoop {
       const tokensToEvaluate = tokens.slice(0, this.config.tokenLimit);
       for (let i = 0; i < tokensToEvaluate.length; i++) {
         const token = tokensToEvaluate[i];
+        if (!token) continue; // Skip if undefined
+        
         logger.info(`[${i + 1}/${tokensToEvaluate.length}] Evaluating ${token.symbol}...`);
         
         try {
@@ -263,7 +266,7 @@ export class TradingLoop {
     } catch (error) {
       logger.error('❌ Trading cycle error:', error);
       this.errors++;
-      await this.telegram.sendMessage(`⚠️ Cycle #${this.cycleCount} Error: ${(error as Error).message}`);
+      await this.telegram.sendAlert(`⚠️ Cycle #${this.cycleCount} Error: ${(error as Error).message}`);
     }
   }
 
@@ -273,7 +276,7 @@ export class TradingLoop {
   private async discoverTokens(): Promise<Token[]> {
     try {
       // Get trending tokens from DexScreener
-      const trending = await getTrendingTokens('bsc', 50);
+      const trending = await getTrendingTokens(50);
 
       // Filter and score tokens
       const tokens: Token[] = trending
@@ -332,7 +335,7 @@ export class TradingLoop {
    */
   private async analyzeMarketConditions(): Promise<MarketConditions> {
     try {
-      const trending = await getTrendingTokens('bsc', 100);
+      const trending = await getTrendingTokens(100);
 
       // Calculate aggregate metrics
       const avgChange = trending.reduce((sum, t) => sum + t.priceChange24h, 0) / trending.length;
@@ -454,17 +457,18 @@ export class TradingLoop {
         : '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
 
       const trade = await executeTrade({
-        tokenIn: WBNB_ADDRESS,
-        tokenOut: token.address,
-        amountIn: ethers.parseEther(decision.amount.toString()),
-        slippage: CONFIG.MAX_SLIPPAGE_PERCENTAGE || 2,
+        tokenAddress: token.address,
+        action: 'buy',
+        amountBNB: decision.amount,
+        slippagePercent: CONFIG.MAX_SLIPPAGE_PERCENTAGE || 2,
       });
 
-      logger.info(`  ✅ Trade executed! TX: ${trade.hash}`);
+      const txHash = trade.txHash || trade.hash || `tx_${Date.now()}`;
+      logger.info(`  ✅ Trade executed! TX: ${txHash}`);
 
       // STEP 7: ADD TO POSITION MANAGER
       await this.positionManager.addPosition({
-        id: trade.hash || `pos_${Date.now()}`,
+        id: txHash,
         token: token.address,
         symbol: token.symbol,
         entryPrice: token.price,
@@ -472,7 +476,7 @@ export class TradingLoop {
         strategy: decision.strategy,
         confidence: decision.confidence,
         timestamp: Date.now(),
-        txHash: trade.hash,
+        txHash: txHash,
         status: 'open',
       });
 
@@ -489,20 +493,20 @@ export class TradingLoop {
       );
 
       // Send notification
-      await this.telegram.sendMessage(
+      await this.telegram.sendAlert(
         `✅ BUY ${token.symbol}\n` +
         `Amount: ${decision.amount.toFixed(4)} BNB\n` +
         `Price: $${token.price.toFixed(6)}\n` +
         `Confidence: ${decision.confidence.toFixed(0)}%\n` +
         `Strategy: ${decision.strategy}\n` +
-        `TX: ${trade.hash}`
+        `TX: ${txHash}`
       );
 
       logger.info(`  🎉 Trade complete and stored in memory`);
 
     } catch (error) {
       logger.error(`  ❌ Trade execution failed:`, error);
-      await this.telegram.sendMessage(
+      await this.telegram.sendAlert(
         `❌ Failed to BUY ${token.symbol}\n` +
         `Error: ${(error as Error).message}`
       );

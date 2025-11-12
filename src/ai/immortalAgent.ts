@@ -156,6 +156,7 @@ export class ImmortalAIAgent {
     confidence: number;
     reasoning: string;
     strategy: string;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   }> {
     try {
       // Analyze similar past trades
@@ -185,7 +186,8 @@ export class ImmortalAIAgent {
         amount: 0,
         confidence: 0,
         reasoning: 'Error in AI decision process',
-        strategy: 'error'
+        strategy: 'error',
+        riskLevel: 'MEDIUM'
       };
     }
   }
