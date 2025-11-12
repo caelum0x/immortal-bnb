@@ -1,4 +1,34 @@
-# Git Submodules in This Project
+# Gi## Current Submodules
+
+### 1. `agents/` - Polymarket Agents
+- **Repository:** https://github.com/Polymarket/agents.git
+- **Purpose:** AI agents and trading strategies for Polymarket
+- **Documentation:** See `agents/README.md`
+
+### 2. `polymarket-examples/` - Polymarket Examples
+- **Repository:** https://github.com/Polymarket/examples.git
+- **Purpose:** Example implementations and integration patterns
+- **Documentation:** See `polymarket-examples/README.md`
+
+### 3. `polymarket-realtime/` - Real-Time Data Client
+- **Repository:** https://github.com/Polymarket/real-time-data-client.git
+- **Purpose:** WebSocket client for real-time market data streaming
+- **Documentation:** See `polymarket-realtime/README.md`
+
+### 4. `polymarket-ctf-exchange/` - CTF Exchange Contracts
+- **Repository:** https://github.com/Polymarket/ctf-exchange.git
+- **Purpose:** Conditional Token Framework exchange smart contracts
+- **Documentation:** See `polymarket-ctf-exchange/README.md`
+
+### 5. `polymarket-neg-risk-adapter/` - Neg Risk CTF Adapter
+- **Repository:** https://github.com/Polymarket/neg-risk-ctf-adapter.git
+- **Purpose:** Adapter for negative risk conditional tokens
+- **Documentation:** See `polymarket-neg-risk-adapter/README.md`
+
+### 6. `polymarket-uma-adapter/` - UMA CTF Adapter
+- **Repository:** https://github.com/Polymarket/uma-ctf-adapter.git
+- **Purpose:** UMA oracle integration for conditional tokens
+- **Documentation:** See `polymarket-uma-adapter/README.md`odules in This Project
 
 This project uses Git submodules to include external repositories.
 
