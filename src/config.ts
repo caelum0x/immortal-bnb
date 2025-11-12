@@ -154,6 +154,10 @@ export const CONFIG = {
   API_PORT: parseInt(process.env.API_PORT || '3001'),
   API_KEY: process.env.API_KEY || '',
 
+  // Python Microservice
+  PYTHON_API_URL: process.env.PYTHON_API_URL || 'http://localhost:5000',
+  PYTHON_API_KEY: process.env.PYTHON_API_KEY || '',
+
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   LOG_TO_FILE: process.env.LOG_TO_FILE === 'true',

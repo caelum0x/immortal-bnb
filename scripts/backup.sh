@@ -1,118 +1,90 @@
 #!/bin/bash
 # Backup Script for Immortal AI Trading Bot
-# Backs up logs, configuration, and trade data
 
 set -e
-
-# Configuration
-BACKUP_DIR="${BACKUP_DIR:-./backups}"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_NAME="immortal-bot-backup-${TIMESTAMP}"
-BACKUP_PATH="${BACKUP_DIR}/${BACKUP_NAME}"
 
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE}🔄 Starting backup...${NC}\n"
+# Configuration
+BACKUP_DIR="./backups/$(date +%Y%m%d_%H%M%S)"
+RETENTION_DAYS=30
+
+echo "💾 Starting backup process..."
 
 # Create backup directory
-mkdir -p "${BACKUP_PATH}"
-echo -e "${GREEN}✅${NC} Created backup directory: ${BACKUP_PATH}"
+mkdir -p "$BACKUP_DIR"
+mkdir -p "$BACKUP_DIR/data"
+mkdir -p "$BACKUP_DIR/logs"
+mkdir -p "$BACKUP_DIR/config"
 
-# Backup logs
-if [ -d "logs" ]; then
-    echo -e "${BLUE}📝${NC} Backing up logs..."
-    cp -r logs "${BACKUP_PATH}/"
-    echo -e "${GREEN}✅${NC} Logs backed up"
+# 1. Backup environment configuration
+echo "📁 Backing up configuration files..."
+if [ -f ".env" ]; then
+    cp .env "$BACKUP_DIR/config/.env.backup"
+    echo -e "${GREEN}✓ Environment file backed up${NC}"
+fi
+
+if [ -f "docker-compose.yml" ]; then
+    cp docker-compose.yml "$BACKUP_DIR/config/docker-compose.yml.backup"
+    echo -e "${GREEN}✓ Docker Compose config backed up${NC}"
+fi
+
+# 2. Backup database
+echo "🗄️  Backing up database..."
+if [ -f "./data/bot.db" ]; then
+    cp ./data/bot.db "$BACKUP_DIR/data/bot.db.backup"
+    echo -e "${GREEN}✓ Database backed up${NC}"
 else
-    echo -e "${YELLOW}⚠️${NC}  No logs directory found"
+    echo -e "${YELLOW}⚠ No database found${NC}"
 fi
 
-# Backup data directory (if exists)
-if [ -d "data" ]; then
-    echo -e "${BLUE}💾${NC} Backing up data..."
-    cp -r data "${BACKUP_PATH}/"
-    echo -e "${GREEN}✅${NC} Data backed up"
+# 3. Backup logs
+echo "📝 Backing up logs..."
+if [ -d "./logs" ]; then
+    cp -r ./logs/* "$BACKUP_DIR/logs/" 2>/dev/null || true
+    echo -e "${GREEN}✓ Logs backed up${NC}"
 fi
 
-# Backup configuration (without secrets)
-echo -e "${BLUE}⚙️${NC}  Backing up configuration..."
-if [ -f ".env.example" ]; then
-    cp .env.example "${BACKUP_PATH}/"
-fi
-if [ -f "package.json" ]; then
-    cp package.json "${BACKUP_PATH}/"
-fi
-echo -e "${GREEN}✅${NC} Configuration backed up"
+# 4. Export Docker container data
+echo "🐳 Exporting Docker data..."
+docker-compose ps > "$BACKUP_DIR/docker-status.txt" 2>/dev/null || true
 
-# Backup contract ABIs (if compiled)
-if [ -d "artifacts" ]; then
-    echo -e "${BLUE}📜${NC} Backing up contract ABIs..."
-    mkdir -p "${BACKUP_PATH}/artifacts"
-    cp -r artifacts/contracts "${BACKUP_PATH}/artifacts/" 2>/dev/null || true
-    echo -e "${GREEN}✅${NC} Contract ABIs backed up"
+# 5. Backup memory data (if available)
+echo "🧠 Backing up memory data..."
+if [ -d "./data/memories" ]; then
+    cp -r ./data/memories "$BACKUP_DIR/data/" 2>/dev/null || true
+    echo -e "${GREEN}✓ Memory data backed up${NC}"
 fi
 
-# Create backup info file
-cat > "${BACKUP_PATH}/backup-info.txt" << EOF
-Immortal AI Trading Bot - Backup
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 6. Create archive
+echo "📦 Creating archive..."
+ARCHIVE_NAME="immortal-bot-backup-$(date +%Y%m%d_%H%M%S).tar.gz"
+tar -czf "./backups/$ARCHIVE_NAME" -C "$BACKUP_DIR" .
 
-Backup Date: $(date)
-Backup Name: ${BACKUP_NAME}
-Hostname: $(hostname)
-User: $(whoami)
+# Get archive size
+ARCHIVE_SIZE=$(du -h "./backups/$ARCHIVE_NAME" | cut -f1)
 
-Contents:
-- Logs
-- Data files
-- Configuration (without secrets)
-- Contract ABIs
+echo -e "${GREEN}✓ Archive created: $ARCHIVE_NAME ($ARCHIVE_SIZE)${NC}"
 
-⚠️  NOT INCLUDED (security):
-- .env file with secrets
-- Private keys
-- API keys
+# 7. Clean up temporary backup directory
+rm -rf "$BACKUP_DIR"
 
-To restore:
-1. Extract backup to project directory
-2. Manually restore .env file with your secrets
-3. Restart bot
+# 8. Clean old backups
+echo "🧹 Cleaning old backups (older than $RETENTION_DAYS days)..."
+find ./backups -name "*.tar.gz" -type f -mtime +$RETENTION_DAYS -delete 2>/dev/null || true
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
-
-# Compress backup
-echo -e "${BLUE}📦${NC} Compressing backup..."
-cd "${BACKUP_DIR}"
-tar -czf "${BACKUP_NAME}.tar.gz" "${BACKUP_NAME}"
-rm -rf "${BACKUP_NAME}"
-cd - > /dev/null
-
-# Calculate size
-BACKUP_SIZE=$(du -h "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz" | cut -f1)
+# 9. List current backups
+echo ""
+echo "📋 Current backups:"
+ls -lh ./backups/*.tar.gz 2>/dev/null | tail -5 || echo "No backups found"
 
 echo ""
 echo -e "${GREEN}✅ Backup complete!${NC}"
-echo -e "   Location: ${BACKUP_DIR}/${BACKUP_NAME}.tar.gz"
-echo -e "   Size: ${BACKUP_SIZE}"
+echo "Backup location: ./backups/$ARCHIVE_NAME"
 echo ""
-
-# Cleanup old backups (keep last 7)
-echo -e "${BLUE}🧹${NC} Cleaning up old backups (keeping last 7)..."
-cd "${BACKUP_DIR}"
-ls -t immortal-bot-backup-*.tar.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
-BACKUP_COUNT=$(ls -1 immortal-bot-backup-*.tar.gz 2>/dev/null | wc -l)
-echo -e "${GREEN}✅${NC} ${BACKUP_COUNT} backups retained"
-cd - > /dev/null
-
-echo ""
-echo -e "${BLUE}💡 Tips:${NC}"
-echo "   - Store backups in a secure location"
-echo "   - Keep .env file separately (encrypted)"
-echo "   - Test restore procedure periodically"
-echo "   - Consider offsite backup for critical data"
-echo ""
+echo "To restore from this backup:"
+echo "  tar -xzf ./backups/$ARCHIVE_NAME -C ./restore"

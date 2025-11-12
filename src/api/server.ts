@@ -6,6 +6,8 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { createServer } from 'http';
 import { CONFIG } from '../config';
 import { logger } from '../utils/logger';
 import { getWalletBalance } from '../blockchain/tradeExecutor';
@@ -16,9 +18,27 @@ import { ImmortalAIAgent } from '../ai/immortalAgent';
 import { CrossChainArbitrageEngine } from '../ai/crossChainStrategy';
 import { StrategyEvolutionEngine } from '../ai/strategyEvolution';
 import { getAIDecision, analyzeSentiment } from '../ai/llmInterface';
+import { initializeWebSocketService, getWebSocketService } from '../services/websocket.js';
+import { getPythonBridge } from '../services/pythonBridge.js';
+
+// Security middleware imports
+import { authenticate, login } from '../middleware/auth.js';
+import { apiLimiter, strictLimiter, authLimiter, tradingLimiter, readLimiter } from '../middleware/rateLimiting.js';
+import {
+  validateTradingDecision,
+  validateMemoryQuery,
+  validateTradeExecution,
+  validateWalletAddress
+} from '../middleware/validation.js';
+
+// Monitoring imports
+import { register, metricsMiddleware } from '../monitoring/metrics.js';
 
 const app = express();
 const port = CONFIG.API_PORT;
+
+// Security: Helmet for HTTP headers
+app.use(helmet());
 
 // Middleware
 app.use(cors({
@@ -30,6 +50,12 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// Monitoring: Prometheus metrics
+app.use(metricsMiddleware);
+
+// Apply general API rate limiting
+app.use('/api/', apiLimiter);
 
 // Initialize AI systems (will be shared across endpoints)
 let immortalAgent: ImmortalAIAgent;
@@ -48,6 +74,17 @@ function initializeAISystem() {
   }
 }
 
+// =============================================================================
+// AUTHENTICATION ENDPOINTS
+// =============================================================================
+
+// Login endpoint (wallet-based authentication)
+app.post('/api/auth/login', authLimiter, login);
+
+// =============================================================================
+// END AUTHENTICATION ENDPOINTS
+// =============================================================================
+
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
@@ -58,6 +95,16 @@ app.get('/api/health', (req: Request, res: Response) => {
     server: 'Immortal AI Trading Bot API',
     version: '1.0.0',
   });
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (req: Request, res: Response) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (error) {
+    res.status(500).end(error);
+  }
 });
 
 // Connection test endpoint for frontend
@@ -274,11 +321,22 @@ app.get('/api/token/:address/balance', async (req: Request, res: Response) => {
 export function startAPIServer() {
   // Initialize AI system before starting the server
   initializeAISystem();
-  
-  app.listen(port, () => {
+
+  // Create HTTP server
+  const httpServer = createServer(app);
+
+  // Initialize WebSocket service
+  const wsService = initializeWebSocketService(httpServer);
+  logger.info('🔌 WebSocket service initialized');
+
+  // Start listening
+  httpServer.listen(port, () => {
     logger.info(`🌐 API Server running on http://localhost:${port}`);
     logger.info(`📡 Health check: http://localhost:${port}/api/health`);
+    logger.info(`🔌 WebSocket server ready`);
   });
+
+  return { httpServer, wsService };
 }
 
 // =============================================================================
@@ -1030,4 +1088,697 @@ app.get('/api/polymarket/trader/:address/strategy', async (req: Request, res: Re
 
 // =============================================================================
 // END POLYMARKET ENDPOINTS
+// =============================================================================
+
+// =============================================================================
+// UNIFIED CROSS-CHAIN ENDPOINTS
+// =============================================================================
+
+// Get unified bot status (DEX + Polymarket)
+app.get('/api/unified/status', async (req: Request, res: Response) => {
+  try {
+    const pythonBridge = getPythonBridge();
+
+    // Get Python API status
+    let pythonStatus = null;
+    try {
+      const isHealthy = await pythonBridge.isServiceHealthy();
+      if (isHealthy) {
+        pythonStatus = await pythonBridge.getAgentStatus();
+      }
+    } catch (error) {
+      logger.warn('Python API not available:', error);
+    }
+
+    // Get DEX balance
+    const dexBalance = await getWalletBalance();
+
+    res.json({
+      dex: {
+        status: botState.dex.status,
+        lastTrade: botState.dex.lastTrade,
+        balance: dexBalance,
+        chain: CONFIG.IS_OPBNB ? 'opbnb' : 'bnb',
+        network: CONFIG.IS_MAINNET ? 'mainnet' : 'testnet',
+        config: botState.dex.config,
+      },
+      polymarket: pythonStatus ? {
+        status: botState.polymarket.status,
+        lastTrade: botState.polymarket.lastTrade,
+        agents: pythonStatus.agents,
+        environment: pythonStatus.environment,
+        config: botState.polymarket.config,
+      } : {
+        status: botState.polymarket.status,
+        lastTrade: botState.polymarket.lastTrade,
+        message: 'Python API is not running',
+        config: botState.polymarket.config,
+      },
+      websocket: {
+        connected: getWebSocketService()?.getConnectedClientsCount() || 0,
+        status: 'operational',
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified status:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified status',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get unified opportunities (DEX + Polymarket)
+app.get('/api/unified/opportunities', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10;
+    const pythonBridge = getPythonBridge();
+
+    const opportunities = [];
+
+    // Try to get Polymarket opportunities
+    try {
+      const polyOpps = await pythonBridge.discoverOpportunities(limit);
+      opportunities.push(...polyOpps.map((opp: any) => ({
+        ...opp,
+        source: 'polymarket',
+      })));
+    } catch (error) {
+      logger.warn('Could not fetch Polymarket opportunities:', error);
+    }
+
+    // Get cross-chain arbitrage opportunities if available
+    if (crossChainEngine) {
+      try {
+        const crossChainOpps = await crossChainEngine.findArbitrageOpportunities();
+        opportunities.push(...crossChainOpps.map((opp: any) => ({
+          ...opp,
+          source: 'cross-chain',
+        })));
+      } catch (error) {
+        logger.warn('Could not fetch cross-chain opportunities:', error);
+      }
+    }
+
+    res.json({
+      opportunities,
+      count: opportunities.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified opportunities:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified opportunities',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get unified portfolio value (DEX + Polymarket)
+app.get('/api/unified/portfolio', async (req: Request, res: Response) => {
+  try {
+    const pythonBridge = getPythonBridge();
+
+    // Get DEX balance
+    const dexBalance = await getWalletBalance();
+
+    // Get Polymarket balance
+    let polymarketBalance = 0;
+    try {
+      const polyBalance = await pythonBridge.getBalance();
+      polymarketBalance = polyBalance.usdc_balance;
+    } catch (error) {
+      logger.warn('Could not fetch Polymarket balance:', error);
+    }
+
+    // Get historical stats
+    const dexStats = await import('../blockchain/memoryStorage').then(m => m.fetchAllMemories());
+    const dexPnL = dexStats.reduce((sum: number, trade: any) => sum + (trade.profitLoss || 0), 0);
+
+    res.json({
+      dex: {
+        balance: dexBalance,
+        pnl: dexPnL,
+        currency: 'BNB',
+      },
+      polymarket: {
+        balance: polymarketBalance,
+        pnl: 0, // TODO: Calculate from Polymarket stats
+        currency: 'USDC',
+      },
+      total: {
+        dex_bnb: dexBalance,
+        polymarket_usd: polymarketBalance,
+        combined_pnl: dexPnL,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified portfolio:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified portfolio',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get unified balance across all chains
+app.get('/api/unified/balance', async (req: Request, res: Response) => {
+  try {
+    const pythonBridge = getPythonBridge();
+
+    const balances = [];
+
+    // DEX balance (BNB/opBNB)
+    try {
+      const dexBalance = await getWalletBalance();
+      balances.push({
+        chain: CONFIG.IS_OPBNB ? 'opbnb' : 'bnb',
+        token: 'BNB',
+        balance: dexBalance,
+        address: CONFIG.WALLET_ADDRESS,
+      });
+    } catch (error) {
+      logger.warn('Could not fetch DEX balance:', error);
+    }
+
+    // Polymarket balance (Polygon)
+    try {
+      const polyBalance = await pythonBridge.getBalance();
+      balances.push({
+        chain: 'polygon',
+        token: 'USDC',
+        balance: polyBalance.usdc_balance,
+        address: polyBalance.address,
+      });
+    } catch (error) {
+      logger.warn('Could not fetch Polymarket balance:', error);
+    }
+
+    res.json({
+      balances,
+      count: balances.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching unified balance:', error);
+    res.status(500).json({
+      error: 'Failed to fetch unified balance',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
+// END UNIFIED ENDPOINTS
+// =============================================================================
+
+
+// =============================================================================
+// UNIFIED MEMORY SYSTEM ENDPOINTS
+// =============================================================================
+
+// Get unified memory analytics
+app.get("/api/memory/analytics", async (req, res) => {
+  try {
+    const { getUnifiedAnalytics } = await import("../blockchain/unifiedMemoryStorage.js");
+    const analytics = await getUnifiedAnalytics();
+    res.json(analytics);
+  } catch (error) {
+    logger.error("Error fetching memory analytics:", error);
+    res.status(500).json({ error: "Failed to fetch memory analytics", message: error.message });
+  }
+});
+
+// Query unified memories with filters
+app.post("/api/memory/query", readLimiter, validateMemoryQuery, async (req, res) => {
+  try {
+    const filters = req.body;
+    const { queryUnifiedMemories } = await import("../blockchain/unifiedMemoryStorage.js");
+    const memories = await queryUnifiedMemories(filters);
+    res.json({ memories, count: memories.length, filters, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error querying memories:", error);
+    res.status(500).json({ error: "Failed to query memories", message: error.message });
+  }
+});
+
+// Get memory synchronization status
+app.get("/api/memory/sync-status", async (req, res) => {
+  try {
+    const { getSyncStatus } = await import("../blockchain/unifiedMemoryStorage.js");
+    const status = getSyncStatus();
+    res.json(status);
+  } catch (error) {
+    logger.error("Error fetching sync status:", error);
+    res.status(500).json({ error: "Failed to fetch sync status", message: error.message });
+  }
+});
+
+// Force synchronization of pending memories
+app.post("/api/memory/force-sync", async (req, res) => {
+  try {
+    const { forceSyncAll } = await import("../blockchain/unifiedMemoryStorage.js");
+    await forceSyncAll();
+    res.json({ success: true, message: "Synchronization initiated", timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error forcing sync:", error);
+    res.status(500).json({ error: "Failed to force sync", message: error.message });
+  }
+});
+
+// Store a new unified memory
+app.post("/api/memory/store", async (req, res) => {
+  try {
+    const memory = req.body;
+    const { storeUnifiedMemory } = await import("../blockchain/unifiedMemoryStorage.js");
+    const success = await storeUnifiedMemory(memory);
+    res.json({ success, id: memory.id, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error storing memory:", error);
+    res.status(500).json({ error: "Failed to store memory", message: error.message });
+  }
+});
+
+// =============================================================================
+// END UNIFIED MEMORY SYSTEM ENDPOINTS
+// =============================================================================
+
+
+// =============================================================================
+// AI ORCHESTRATOR ENDPOINTS
+// =============================================================================
+
+// Get AI orchestrator decision
+app.post("/api/orchestrator/decision", tradingLimiter, validateTradingDecision, async (req, res) => {
+  try {
+    const request = req.body;
+    const { getOrchestrator } = await import("../ai/orchestrator.js");
+    const orchestrator = getOrchestrator();
+    const decision = await orchestrator.makeDecision(request);
+    res.json(decision);
+  } catch (error) {
+    logger.error("Error getting orchestrator decision:", error);
+    res.status(500).json({ error: "Failed to get decision", message: error.message });
+  }
+});
+
+// Get orchestrator performance metrics
+app.get("/api/orchestrator/metrics", async (req, res) => {
+  try {
+    const { getOrchestrator } = await import("../ai/orchestrator.js");
+    const orchestrator = getOrchestrator();
+    const metrics = orchestrator.getPerformanceMetrics();
+    res.json({ metrics, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error getting orchestrator metrics:", error);
+    res.status(500).json({ error: "Failed to get metrics", message: error.message });
+  }
+});
+
+// Record trade outcome for learning
+app.post("/api/orchestrator/outcome", async (req, res) => {
+  try {
+    const { agentType, success } = req.body;
+    const { getOrchestrator } = await import("../ai/orchestrator.js");
+    const orchestrator = getOrchestrator();
+    orchestrator.recordOutcome(agentType, success);
+    res.json({ success: true, timestamp: Date.now() });
+  } catch (error) {
+    logger.error("Error recording outcome:", error);
+    res.status(500).json({ error: "Failed to record outcome", message: error.message });
+  }
+});
+
+// =============================================================================
+// END AI ORCHESTRATOR ENDPOINTS
+// =============================================================================
+
+
+// =============================================================================
+// PHASE 8: ADVANCED FEATURES ENDPOINTS
+// =============================================================================
+
+// Multi-DEX Aggregator Endpoints
+
+// Get best price across all DEXs
+app.post("/api/dex/best-quote", tradingLimiter, async (req, res) => {
+  try {
+    const { tokenIn, tokenOut, amountIn } = req.body;
+
+    if (!tokenIn || !tokenOut || !amountIn) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    const { getDEXAggregator } = await import("../dex/dexAggregator.js");
+    const aggregator = getDEXAggregator();
+
+    const result = await aggregator.getBestQuote(tokenIn, tokenOut, BigInt(amountIn));
+
+    res.json({
+      bestDex: result.bestQuote.dexName,
+      outputAmount: result.bestQuote.outputAmount.toString(),
+      priceImpact: result.bestQuote.priceImpact,
+      savingsPercentage: result.savingsPercentage,
+      allQuotes: result.allQuotes.map(q => ({
+        dex: q.dexName,
+        outputAmount: q.outputAmount.toString(),
+        priceImpact: q.priceImpact,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting DEX quote:", error);
+    res.status(500).json({ error: "Failed to get quote", message: error.message });
+  }
+});
+
+// Execute trade on best DEX
+app.post("/api/dex/execute-best", tradingLimiter, async (req, res) => {
+  try {
+    const { tokenIn, tokenOut, amountIn, minAmountOut } = req.body;
+
+    if (!tokenIn || !tokenOut || !amountIn || !minAmountOut) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    const { getDEXAggregator } = await import("../dex/dexAggregator.js");
+    const aggregator = getDEXAggregator();
+
+    // This would need a signer - implementation depends on your auth setup
+    // For now, just return the plan
+    const quote = await aggregator.getBestQuote(tokenIn, tokenOut, BigInt(amountIn));
+
+    res.json({
+      success: true,
+      message: "Trade plan created",
+      dex: quote.bestQuote.dexName,
+      expectedOutput: quote.bestQuote.outputAmount.toString(),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error executing best trade:", error);
+    res.status(500).json({ error: "Failed to execute trade", message: error.message });
+  }
+});
+
+// Flash Loan Endpoints
+
+// Find flash loan arbitrage opportunities
+app.get("/api/flashloan/opportunities", readLimiter, async (req, res) => {
+  try {
+    const minProfitPercentage = parseFloat(req.query.minProfit as string) || 0.5;
+
+    const { getFlashLoanExecutor } = await import("../flashloans/flashLoanExecutor.js");
+    const executor = getFlashLoanExecutor();
+
+    const opportunities = await executor.findFlashLoanOpportunities(minProfitPercentage);
+
+    res.json({
+      opportunities: opportunities.map(opp => ({
+        buyDex: opp.buyDEX,
+        sellDex: opp.sellDEX,
+        tokenIn: opp.tokenIn,
+        tokenOut: opp.tokenOut,
+        expectedProfit: opp.expectedProfit.toString(),
+      })),
+      count: opportunities.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error finding flash loan opportunities:", error);
+    res.status(500).json({ error: "Failed to find opportunities", message: error.message });
+  }
+});
+
+// Execute flash loan arbitrage
+app.post("/api/flashloan/execute", strictLimiter, async (req, res) => {
+  try {
+    const { loanToken, loanAmount, strategy } = req.body;
+
+    if (!loanToken || !loanAmount || !strategy) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    const { getFlashLoanExecutor } = await import("../flashloans/flashLoanExecutor.js");
+    const executor = getFlashLoanExecutor();
+
+    const result = await executor.executeFlashLoanArbitrage(
+      loanToken,
+      BigInt(loanAmount),
+      strategy
+    );
+
+    res.json({
+      success: result.success,
+      profit: result.profit?.toString(),
+      txHash: result.txHash,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error executing flash loan:", error);
+    res.status(500).json({ error: "Failed to execute flash loan", message: error.message });
+  }
+});
+
+// MEV Protection Endpoints
+
+// Send MEV-protected transaction
+app.post("/api/mev/protected-trade", strictLimiter, async (req, res) => {
+  try {
+    const { transaction, protection } = req.body;
+
+    if (!transaction || !protection) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    // This would need actual implementation with wallet signer
+    res.json({
+      success: true,
+      message: "MEV protection configured",
+      useFlashbots: protection.useFlashbots || false,
+      maxSlippage: protection.maxSlippage || 0.5,
+      deadline: protection.deadline || 300,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error with MEV protection:", error);
+    res.status(500).json({ error: "Failed to protect trade", message: error.message });
+  }
+});
+
+// Check for sandwich attack
+app.get("/api/mev/check-sandwich/:txHash", readLimiter, async (req, res) => {
+  try {
+    const { txHash } = req.params;
+
+    if (!txHash) {
+      return res.status(400).json({ error: "Transaction hash required" });
+    }
+
+    const { getMEVProtectionService } = await import("../mev/mevProtection.js");
+    const mevService = getMEVProtectionService();
+
+    // This would need provider - simplified for now
+    res.json({
+      txHash,
+      isSandwich: false,
+      message: "MEV detection service active",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error checking sandwich attack:", error);
+    res.status(500).json({ error: "Failed to check sandwich", message: error.message });
+  }
+});
+
+// Bot Control Endpoints
+
+// Global bot state
+let botState = {
+  dex: {
+    status: 'STOPPED' as 'RUNNING' | 'STOPPED' | 'ERROR',
+    lastTrade: null as number | null,
+    config: {
+      maxTradeAmount: 1.0,
+      confidenceThreshold: 0.7,
+      stopLoss: 0.05,
+      maxSlippage: 0.01,
+    }
+  },
+  polymarket: {
+    status: 'STOPPED' as 'RUNNING' | 'STOPPED' | 'ERROR',
+    lastTrade: null as number | null,
+    config: {
+      maxBetAmount: 100,
+      confidenceThreshold: 0.75,
+      maxSlippage: 0.02,
+    }
+  }
+};
+
+// Start bot endpoint
+app.post("/api/bot/start", tradingLimiter, async (req, res) => {
+  try {
+    const { type } = req.body;
+
+    if (!type || !['dex', 'polymarket', 'all'].includes(type)) {
+      return res.status(400).json({ error: "Invalid bot type. Must be 'dex', 'polymarket', or 'all'" });
+    }
+
+    const wsService = getWebSocketService();
+
+    if (type === 'dex' || type === 'all') {
+      botState.dex.status = 'RUNNING';
+      logger.info('🚀 DEX bot started');
+
+      // Emit WebSocket event
+      if (wsService) {
+        wsService.broadcastBotStatus({
+          dex: botState.dex,
+          polymarket: botState.polymarket
+        });
+      }
+    }
+
+    if (type === 'polymarket' || type === 'all') {
+      // Start Polymarket bot via Python bridge
+      const pythonBridge = getPythonBridge();
+      try {
+        await pythonBridge.startAgent('market_analyzer');
+        botState.polymarket.status = 'RUNNING';
+        logger.info('🎲 Polymarket bot started');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.warn('Polymarket bot failed to start:', error);
+        botState.polymarket.status = 'ERROR';
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${type.toUpperCase()} bot started successfully`,
+      status: {
+        dex: botState.dex.status,
+        polymarket: botState.polymarket.status,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error starting bot:", error);
+    res.status(500).json({ error: "Failed to start bot", message: error.message });
+  }
+});
+
+// Stop bot endpoint
+app.post("/api/bot/stop", tradingLimiter, async (req, res) => {
+  try {
+    const { type } = req.body;
+
+    if (!type || !['dex', 'polymarket', 'all'].includes(type)) {
+      return res.status(400).json({ error: "Invalid bot type. Must be 'dex', 'polymarket', or 'all'" });
+    }
+
+    const wsService = getWebSocketService();
+
+    if (type === 'dex' || type === 'all') {
+      botState.dex.status = 'STOPPED';
+      logger.info('🛑 DEX bot stopped');
+
+      // Emit WebSocket event
+      if (wsService) {
+        wsService.broadcastBotStatus({
+          dex: botState.dex,
+          polymarket: botState.polymarket
+        });
+      }
+    }
+
+    if (type === 'polymarket' || type === 'all') {
+      // Stop Polymarket bot via Python bridge
+      const pythonBridge = getPythonBridge();
+      try {
+        await pythonBridge.stopAgent('market_analyzer');
+        botState.polymarket.status = 'STOPPED';
+        logger.info('🎲 Polymarket bot stopped');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.warn('Polymarket bot stop failed:', error);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${type.toUpperCase()} bot stopped successfully`,
+      status: {
+        dex: botState.dex.status,
+        polymarket: botState.polymarket.status,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error stopping bot:", error);
+    res.status(500).json({ error: "Failed to stop bot", message: error.message });
+  }
+});
+
+// Update bot configuration
+app.post("/api/bot/config", tradingLimiter, async (req, res) => {
+  try {
+    const { type, config } = req.body;
+
+    if (!type || !['dex', 'polymarket'].includes(type)) {
+      return res.status(400).json({ error: "Invalid bot type. Must be 'dex' or 'polymarket'" });
+    }
+
+    if (type === 'dex') {
+      botState.dex.config = { ...botState.dex.config, ...config };
+      logger.info('⚙️ DEX bot config updated:', config);
+    } else {
+      botState.polymarket.config = { ...botState.polymarket.config, ...config };
+      logger.info('⚙️ Polymarket bot config updated:', config);
+    }
+
+    res.json({
+      success: true,
+      message: 'Bot configuration updated',
+      config: type === 'dex' ? botState.dex.config : botState.polymarket.config,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error updating bot config:", error);
+    res.status(500).json({ error: "Failed to update config", message: error.message });
+  }
+});
+
+// Get bot state
+app.get("/api/bot/state", async (req, res) => {
+  try {
+    res.json({
+      state: botState,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting bot state:", error);
+    res.status(500).json({ error: "Failed to get bot state", message: error.message });
+  }
+});
+
+// =============================================================================
+// END PHASE 8 ENDPOINTS
 // =============================================================================

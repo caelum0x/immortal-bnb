@@ -1,166 +1,83 @@
 /**
- * Request Validation Middleware
- * Validates all incoming API requests using express-validator
+ * Input Validation Middleware
+ * Validates and sanitizes user input
  */
 
-import { body, query, validationResult } from 'express-validator';
-import type { ValidationChain } from 'express-validator';
+import { body, param, query, validationResult } from 'express-validator';
 import type { Request, Response, NextFunction } from 'express';
-import { logger } from '../utils/logger';
+import { logger } from '../utils/logger.js';
 
-/**
- * Middleware to handle validation errors
- */
-export function handleValidationErrors(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void | Response {
+// Validation error handler
+export function handleValidationErrors(req: Request, res: Response, next: NextFunction) {
   const errors = validationResult(req);
-
+  
   if (!errors.isEmpty()) {
-    logger.warn('Validation failed:', {
-      path: req.path,
-      errors: errors.array(),
-    });
-
+    logger.warn('Validation errors:', errors.array());
     return res.status(400).json({
       error: 'Validation failed',
-      details: errors.array().map((err) => ({
-        field: 'path' in err ? err.path : 'unknown',
-        message: err.msg,
-        value: 'value' in err ? err.value : undefined,
-      })),
+      errors: errors.array(),
     });
   }
-
+  
   next();
 }
 
-/**
- * Validates Ethereum address format
- */
-const isEthereumAddress = (value: string): boolean => {
-  return /^0x[a-fA-F0-9]{40}$/.test(value);
-};
+// Common validations
+export const validateWalletAddress = body('walletAddress')
+  .trim()
+  .isLength({ min: 42, max: 42 })
+  .withMessage('Invalid wallet address format');
 
-/**
- * Validation rules for POST /api/start-bot
- */
-export const validateStartBot: ValidationChain[] = [
-  body('tokens')
-    .isArray({ min: 0, max: 10 })
-    .withMessage('Tokens must be an array with maximum 10 addresses'),
+export const validateTokenAddress = param('address')
+  .trim()
+  .isLength({ min: 42, max: 42 })
+  .withMessage('Invalid token address');
 
-  body('tokens.*')
-    .custom((value) => {
-      if (!value || value === '') {
-        // Empty strings are allowed (will be filtered out)
-        return true;
-      }
-      if (!isEthereumAddress(value)) {
-        throw new Error('Invalid Ethereum address format');
-      }
-      return true;
-    })
-    .withMessage('Each token must be a valid Ethereum address (0x + 40 hex chars)'),
+export const validateAmount = body('amount')
+  .isFloat({ min: 0 })
+  .withMessage('Amount must be a positive number');
 
-  body('risk')
-    .isInt({ min: 1, max: 10 })
-    .withMessage('Risk level must be an integer between 1 and 10'),
-];
+export const validateConfidence = body('confidence')
+  .optional()
+  .isFloat({ min: 0, max: 1 })
+  .withMessage('Confidence must be between 0 and 1');
 
-/**
- * Validation rules for GET /api/trade-logs
- */
-export const validateTradeLogsQuery: ValidationChain[] = [
-  query('limit')
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage('Limit must be an integer between 1 and 100')
-    .toInt(), // Convert string to number
-];
+export const validateLimit = query('limit')
+  .optional()
+  .isInt({ min: 1, max: 100 })
+  .withMessage('Limit must be between 1 and 100');
 
-/**
- * Validation rules for GET /api/memories
- */
-export const validateMemoriesQuery: ValidationChain[] = [
-  query('limit')
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage('Limit must be an integer between 1 and 100')
-    .toInt(),
-];
+export const validatePlatform = body('platform')
+  .optional()
+  .isIn(['pancakeswap', 'polymarket', 'cross-chain'])
+  .withMessage('Invalid platform');
 
-/**
- * Validation rules for GET /api/discover-tokens
- */
-export const validateDiscoverTokensQuery: ValidationChain[] = [
-  query('limit')
-    .optional()
-    .isInt({ min: 1, max: 50 })
-    .withMessage('Limit must be an integer between 1 and 50')
-    .toInt(),
-];
+export const validateChain = body('chain')
+  .optional()
+  .isIn(['bnb', 'opbnb', 'polygon'])
+  .withMessage('Invalid chain');
 
-/**
- * General request sanitization
- * Strips dangerous characters and prevents XSS
- */
-export function sanitizeRequest(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
-  // Sanitize query parameters
-  if (req.query) {
-    for (const key in req.query) {
-      if (typeof req.query[key] === 'string') {
-        // Remove potential script tags and dangerous characters
-        req.query[key] = (req.query[key] as string)
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-          .trim();
-      }
-    }
-  }
-
-  // Sanitize body parameters
-  if (req.body && typeof req.body === 'object') {
-    for (const key in req.body) {
-      if (typeof req.body[key] === 'string') {
-        req.body[key] = req.body[key]
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-          .trim();
-      }
-    }
-  }
-
-  next();
-}
-
-/**
- * Validate and sanitize token addresses array
- */
-export function validateAndSanitizeTokens(tokens: string[]): string[] {
-  if (!Array.isArray(tokens)) {
-    return [];
-  }
-
-  return tokens
-    .filter((token) => token && token.trim() !== '') // Remove empty strings
-    .filter((token) => isEthereumAddress(token)) // Only valid addresses
-    .map((token) => token.toLowerCase()); // Normalize to lowercase
-}
-
-/**
- * Export all validations for easy import
- */
-export default {
-  validateStartBot,
-  validateTradeLogsQuery,
-  validateMemoriesQuery,
-  validateDiscoverTokensQuery,
+// Trading decision validation
+export const validateTradingDecision = [
+  body('platform').isIn(['dex', 'polymarket', 'cross-chain']),
+  body('urgency').optional().isIn(['low', 'medium', 'high']),
+  body('requiresResearch').optional().isBoolean(),
   handleValidationErrors,
-  sanitizeRequest,
-  validateAndSanitizeTokens,
-};
+];
+
+// Memory query validation
+export const validateMemoryQuery = [
+  body('platform').optional().isIn(['pancakeswap', 'polymarket', 'cross-chain']),
+  body('chain').optional().isIn(['bnb', 'opbnb', 'polygon']),
+  body('limit').optional().isInt({ min: 1, max: 1000 }),
+  body('offset').optional().isInt({ min: 0 }),
+  handleValidationErrors,
+];
+
+// Trade execution validation
+export const validateTradeExecution = [
+  body('market_id').optional().isString(),
+  body('side').isIn(['BUY', 'SELL']),
+  body('amount').isFloat({ min: 0.01 }),
+  handleValidationErrors,
+];
