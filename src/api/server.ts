@@ -34,6 +34,9 @@ import {
 // Monitoring imports
 import { register, metricsMiddleware } from '../monitoring/metrics.js';
 
+// Polymarket routes
+import polymarketRoutes from '../polymarket/polymarketApiRoutes.js';
+
 const app = express();
 const port = CONFIG.API_PORT;
 
@@ -316,6 +319,11 @@ app.get('/api/token/:address/balance', async (req: Request, res: Response) => {
     });
   }
 });
+
+// =============================================================================
+// POLYMARKET ROUTES
+// =============================================================================
+app.use('/api/polymarket', polymarketRoutes);
 
 // Start server
 export function startAPIServer() {
