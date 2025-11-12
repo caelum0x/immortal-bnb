@@ -29,11 +29,26 @@ export interface TradeLog {
   profitLoss?: number;
 }
 
+export interface Position {
+  id: string;
+  tokenSymbol: string;
+  tokenAddress: string;
+  entryPrice: number;
+  currentPrice: number;
+  amount: number;
+  value: number;
+  pnl: number;
+  pnlPercent: number;
+  entryTime: number;
+  status: 'active' | 'pending' | 'closed';
+}
+
 class BotStateManager {
   private running: boolean = false;
   private config: BotConfig | null = null;
   private intervalId: NodeJS.Timeout | null = null;
   private tradeLogs: TradeLog[] = [];
+  private positions: Position[] = [];
   private stats = {
     totalTrades: 0,
     wins: 0,
@@ -165,6 +180,94 @@ class BotStateManager {
   }
 
   /**
+   * Get active positions
+   */
+  getPositions(): Position[] {
+    return [...this.positions];
+  }
+
+  /**
+   * Add a new position
+   */
+  addPosition(position: Position): void {
+    this.positions.push(position);
+    logger.info(`📊 Position added: ${position.tokenSymbol} (${position.amount})`);
+  }
+
+  /**
+   * Update position with current price
+   */
+  updatePosition(id: string, currentPrice: number): void {
+    const position = this.positions.find(p => p.id === id);
+    if (position) {
+      position.currentPrice = currentPrice;
+      position.value = position.amount * currentPrice;
+      position.pnl = position.value - (position.amount * position.entryPrice);
+      position.pnlPercent = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
+    }
+  }
+
+  /**
+   * Close a position
+   */
+  async closePosition(id: string): Promise<{ success: boolean; error?: string; trade?: any }> {
+    try {
+      const positionIndex = this.positions.findIndex(p => p.id === id);
+
+      if (positionIndex === -1) {
+        return {
+          success: false,
+          error: 'Position not found'
+        };
+      }
+
+      const position = this.positions[positionIndex];
+
+      if (position.status === 'closed') {
+        return {
+          success: false,
+          error: 'Position already closed'
+        };
+      }
+
+      // Mark position as closed
+      position.status = 'closed';
+
+      // Create trade log
+      const tradeLog: TradeLog = {
+        id: `trade-${Date.now()}`,
+        timestamp: Date.now(),
+        token: position.tokenAddress,
+        tokenSymbol: position.tokenSymbol,
+        action: 'sell',
+        amount: position.amount,
+        price: position.currentPrice,
+        status: 'success',
+        profitLoss: position.pnl,
+      };
+
+      this.addTradeLog(tradeLog);
+
+      // Remove from positions array
+      this.positions.splice(positionIndex, 1);
+
+      logger.info(`✅ Position closed: ${position.tokenSymbol} | P&L: ${position.pnl.toFixed(4)}`);
+
+      return {
+        success: true,
+        trade: tradeLog
+      };
+
+    } catch (error) {
+      logger.error(`Error closing position ${id}:`, error);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
    * Reset state (for testing)
    */
   reset(): void {
@@ -175,6 +278,7 @@ class BotStateManager {
       this.intervalId = null;
     }
     this.tradeLogs = [];
+    this.positions = [];
     this.stats = {
       totalTrades: 0,
       wins: 0,
