@@ -265,6 +265,66 @@ export class PythonBridge {
         const response = await this.client.post('/api/run-trading-strategy');
         return response.data;
     }
+
+    /**
+     * Query events using RAG (vector similarity search)
+     */
+    async ragQueryEvents(query: string, maxResults: number = 5): Promise<any> {
+        const response = await this.client.post('/api/rag/query-events', {
+            query,
+            max_results: maxResults,
+        });
+        return response.data;
+    }
+
+    /**
+     * Query markets using RAG (vector similarity search)
+     */
+    async ragQueryMarkets(query: string, maxResults: number = 5): Promise<any> {
+        const response = await this.client.post('/api/rag/query-markets', {
+            query,
+            max_results: maxResults,
+        });
+        return response.data;
+    }
+
+    /**
+     * Get comprehensive market intelligence with RAG + News + Search
+     */
+    async getMarketIntelligence(request: {
+        market_id?: string;
+        event_title?: string;
+        include_news?: boolean;
+        include_search?: boolean;
+        depth?: 'quick' | 'standard' | 'deep';
+    }): Promise<any> {
+        const response = await this.client.post('/api/intelligence/market-analysis', {
+            market_id: request.market_id,
+            event_title: request.event_title,
+            include_news: request.include_news ?? true,
+            include_search: request.include_search ?? true,
+            depth: request.depth || 'standard',
+        });
+        return response.data;
+    }
+
+    /**
+     * Get AI-powered trading decision with RAG enhancement
+     */
+    async getAIDecision(request: {
+        market_id: string;
+        amount?: number;
+        use_rag?: boolean;
+        include_forecast?: boolean;
+    }): Promise<any> {
+        const response = await this.client.post('/api/ai/decision', {
+            market_id: request.market_id,
+            amount: request.amount,
+            use_rag: request.use_rag ?? true,
+            include_forecast: request.include_forecast ?? true,
+        });
+        return response.data;
+    }
 }
 
 // Singleton instance

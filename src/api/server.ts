@@ -3423,5 +3423,225 @@ app.get("/api/bot/status", async (req, res) => {
 });
 
 // =============================================================================
+// PYTHON AI AGENTS PROXY ENDPOINTS
+// =============================================================================
+
+/**
+ * POST /api/ai/rag/query-events - Query events using RAG
+ */
+app.post("/api/ai/rag/query-events", async (req, res) => {
+  try {
+    const { query, max_results = 5 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing query parameter",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    // Check if Python service is healthy
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const results = await pythonBridge.ragQueryEvents(query, max_results);
+
+    res.json({
+      success: true,
+      ...results,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error querying events with RAG:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to query events with RAG",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/ai/rag/query-markets - Query markets using RAG
+ */
+app.post("/api/ai/rag/query-markets", async (req, res) => {
+  try {
+    const { query, max_results = 5 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing query parameter",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const results = await pythonBridge.ragQueryMarkets(query, max_results);
+
+    res.json({
+      success: true,
+      ...results,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error querying markets with RAG:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to query markets with RAG",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/ai/market-intelligence - Get comprehensive market intelligence
+ */
+app.post("/api/ai/market-intelligence", async (req, res) => {
+  try {
+    const { market_id, event_title, include_news = true, include_search = true, depth = 'standard' } = req.body;
+
+    if (!market_id && !event_title) {
+      return res.status(400).json({
+        success: false,
+        error: "Either market_id or event_title must be provided",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const intelligence = await pythonBridge.getMarketIntelligence({
+      market_id,
+      event_title,
+      include_news,
+      include_search,
+      depth,
+    });
+
+    res.json({
+      success: true,
+      intelligence,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting market intelligence:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get market intelligence",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/ai/decision - Get AI-powered trading decision
+ */
+app.post("/api/ai/decision", async (req, res) => {
+  try {
+    const { market_id, amount, use_rag = true, include_forecast = true } = req.body;
+
+    if (!market_id) {
+      return res.status(400).json({
+        success: false,
+        error: "market_id is required",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const decision = await pythonBridge.getAIDecision({
+      market_id,
+      amount,
+      use_rag,
+      include_forecast,
+    });
+
+    res.json({
+      success: true,
+      decision,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting AI decision:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get AI decision",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/ai/status - Get Python AI service status
+ */
+app.get("/api/ai/status", async (req, res) => {
+  try {
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.checkHealth();
+
+    if (isHealthy) {
+      const status = await pythonBridge.getAgentStatus();
+      res.json({
+        success: true,
+        healthy: true,
+        status,
+        timestamp: Date.now(),
+      });
+    } else {
+      res.json({
+        success: true,
+        healthy: false,
+        message: "Python AI service is not responding",
+        timestamp: Date.now(),
+      });
+    }
+  } catch (error) {
+    logger.error("Error getting AI status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get AI status",
+      message: error.message,
+    });
+  }
+});
+
+// =============================================================================
 // END API ARCHITECTURE STANDARD ENDPOINTS
 // =============================================================================
