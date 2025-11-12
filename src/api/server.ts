@@ -37,6 +37,12 @@ import { register, metricsMiddleware } from '../monitoring/metrics.js';
 // Polymarket routes
 import polymarketRoutes from '../polymarket/polymarketApiRoutes.js';
 
+// Telegram routes
+import telegramRoutes from './telegramRoutes.js';
+
+// Cross-chain routes
+import crossChainRoutes from './crossChainRoutes.js';
+
 const app = express();
 const port = CONFIG.API_PORT;
 
@@ -324,6 +330,16 @@ app.get('/api/token/:address/balance', async (req: Request, res: Response) => {
 // POLYMARKET ROUTES
 // =============================================================================
 app.use('/api/polymarket', polymarketRoutes);
+
+// =============================================================================
+// TELEGRAM ROUTES
+// =============================================================================
+app.use('/api/telegram', telegramRoutes);
+
+// =============================================================================
+// CROSS-CHAIN ROUTES
+// =============================================================================
+app.use('/api/cross-chain', crossChainRoutes);
 
 // Start server
 export function startAPIServer() {
