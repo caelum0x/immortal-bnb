@@ -56,12 +56,22 @@ export interface BalanceChangeEvent {
     timestamp: number;
 }
 
+export interface PriceUpdateEvent {
+    type: 'price-update';
+    token: string;
+    price: number;
+    change24h: number;
+    volume24h?: number;
+    timestamp: number;
+}
+
 export type WebSocketEvent =
     | TradeExecutedEvent
     | BotStatusEvent
     | OpportunityFoundEvent
     | MemoryUpdatedEvent
-    | BalanceChangeEvent;
+    | BalanceChangeEvent
+    | PriceUpdateEvent;
 
 export class WebSocketService {
     private io: SocketIOServer;

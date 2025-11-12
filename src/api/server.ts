@@ -1958,3 +1958,419 @@ app.get("/api/bot/trading-cycle", async (req, res) => {
 // =============================================================================
 // END PHASE 8 ENDPOINTS
 // =============================================================================
+
+// =============================================================================
+// API ARCHITECTURE STANDARD ENDPOINTS
+// =============================================================================
+
+// Trading Endpoints
+
+/**
+ * GET /api/positions - Get active trading positions
+ */
+app.get("/api/positions", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const riskStatus = await orchestrator.getRiskStatus();
+    const positions = riskStatus.openPositions;
+
+    res.json({
+      success: true,
+      count: positions.length,
+      positions: positions.map(pos => ({
+        tokenAddress: pos.tokenAddress,
+        tokenSymbol: pos.tokenSymbol,
+        action: pos.action,
+        amount: pos.amount,
+        entryPrice: pos.entryPrice,
+        currentPrice: pos.currentPrice,
+        unrealizedPnL: pos.unrealizedPnL,
+        unrealizedPnLPercent: pos.unrealizedPnLPercent,
+        timestamp: pos.timestamp,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting positions:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get positions",
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/portfolio - Get portfolio summary
+ * (Alias for /api/unified/portfolio)
+ */
+app.get("/api/portfolio", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const [performance, riskStatus] = await Promise.all([
+      orchestrator.getPerformance(),
+      orchestrator.getRiskStatus(),
+    ]);
+
+    const walletBalance = await getWalletBalance();
+
+    res.json({
+      success: true,
+      portfolio: {
+        totalValue: walletBalance,
+        positions: riskStatus.openPositions.length,
+        totalExposure: riskStatus.totalExposure,
+        unrealizedPnL: riskStatus.openPositions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0),
+        performance: {
+          totalTrades: performance.summary.totalTrades,
+          successRate: performance.summary.successRate,
+          netProfit: performance.summary.netProfit,
+          sharpeRatio: performance.summary.sharpeRatio,
+          maxDrawdown: performance.summary.maxDrawdown,
+        },
+        riskLevel: riskStatus.portfolioRisk.riskLevel,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting portfolio:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get portfolio",
+      message: error.message
+    });
+  }
+});
+
+// Memory Endpoints
+
+/**
+ * GET /api/memories - Get all trade memories
+ */
+app.get("/api/memories", async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, platform } = req.query;
+
+    const { fetchAllMemories } = await import('../blockchain/memoryStorage.js');
+    const memoryIds = await fetchAllMemories();
+
+    // Apply pagination
+    const startIndex = parseInt(offset as string);
+    const endIndex = startIndex + parseInt(limit as string);
+    const paginatedIds = memoryIds.slice(startIndex, endIndex);
+
+    // Fetch memories in parallel
+    const { fetchMemory } = await import('../blockchain/memoryStorage.js');
+    const memories = await Promise.all(
+      paginatedIds.map(id => fetchMemory(id))
+    );
+
+    // Filter out null values and optionally filter by platform
+    const validMemories = memories.filter(m => m !== null);
+    const filteredMemories = platform
+      ? validMemories.filter(m => m.tokenSymbol.toLowerCase().includes(platform.toString().toLowerCase()))
+      : validMemories;
+
+    res.json({
+      success: true,
+      count: filteredMemories.length,
+      total: memoryIds.length,
+      memories: filteredMemories,
+      pagination: {
+        limit: parseInt(limit as string),
+        offset: startIndex,
+        hasMore: endIndex < memoryIds.length,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting memories:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get memories",
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/memories/:id - Get specific memory
+ */
+app.get("/api/memories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { fetchMemory } = await import('../blockchain/memoryStorage.js');
+    const memory = await fetchMemory(id);
+
+    if (!memory) {
+      return res.status(404).json({
+        success: false,
+        error: "Memory not found",
+        message: `No memory found with ID: ${id}`,
+      });
+    }
+
+    res.json({
+      success: true,
+      memory,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting memory:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get memory",
+      message: error.message
+    });
+  }
+});
+
+// Market Data Endpoints
+
+/**
+ * GET /api/tokens/trending - Get trending tokens
+ */
+app.get("/api/tokens/trending", async (req, res) => {
+  try {
+    const { limit = 20, sortBy = 'volume24h' } = req.query;
+
+    const DynamicTokenDiscovery = (await import('../blockchain/dynamicTokenDiscovery.js')).default;
+    const discovery = new DynamicTokenDiscovery();
+
+    const tokens = await discovery.discoverTrendingTokens({
+      limit: parseInt(limit as string),
+      sortBy: sortBy as 'volume24h' | 'priceChange24h' | 'liquidity',
+    });
+
+    res.json({
+      success: true,
+      count: tokens.length,
+      tokens: tokens.map(token => ({
+        address: token.address,
+        symbol: token.symbol,
+        name: token.name,
+        price: token.price,
+        priceChange24h: token.priceChange24h,
+        volume24h: token.volume24h,
+        liquidity: token.liquidity,
+        confidence: token.confidence,
+        riskLevel: token.riskLevel,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting trending tokens:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get trending tokens",
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/market/overview - Get market overview
+ */
+app.get("/api/market/overview", async (req, res) => {
+  try {
+    const DynamicTokenDiscovery = (await import('../blockchain/dynamicTokenDiscovery.js')).default;
+    const discovery = new DynamicTokenDiscovery();
+
+    // Get trending tokens for overview
+    const trendingTokens = await discovery.discoverTrendingTokens({ limit: 10 });
+
+    // Calculate market stats
+    const totalVolume24h = trendingTokens.reduce((sum, t) => sum + t.volume24h, 0);
+    const avgPriceChange = trendingTokens.reduce((sum, t) => sum + t.priceChange24h, 0) / trendingTokens.length;
+    const topGainer = trendingTokens.reduce((max, t) => t.priceChange24h > max.priceChange24h ? t : max, trendingTokens[0]);
+    const topLoser = trendingTokens.reduce((min, t) => t.priceChange24h < min.priceChange24h ? t : min, trendingTokens[0]);
+
+    // Get BNB price
+    const bnbPrice = await (async () => {
+      try {
+        const { getTokenData } = await import('../data/marketFetcher.js');
+        const bnbData = await getTokenData('0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'); // WBNB
+        return bnbData?.price || 0;
+      } catch {
+        return 0;
+      }
+    })();
+
+    res.json({
+      success: true,
+      overview: {
+        bnbPrice,
+        totalVolume24h,
+        avgPriceChange24h: avgPriceChange,
+        trending: trendingTokens.length,
+        marketSentiment: avgPriceChange > 0 ? 'bullish' : avgPriceChange < 0 ? 'bearish' : 'neutral',
+        topGainer: topGainer ? {
+          symbol: topGainer.symbol,
+          priceChange24h: topGainer.priceChange24h,
+        } : null,
+        topLoser: topLoser ? {
+          symbol: topLoser.symbol,
+          priceChange24h: topLoser.priceChange24h,
+        } : null,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting market overview:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get market overview",
+      message: error.message
+    });
+  }
+});
+
+// Polymarket Endpoints
+
+/**
+ * POST /api/polymarket/place-order - Place Polymarket order
+ */
+app.post("/api/polymarket/place-order", tradingLimiter, async (req, res) => {
+  try {
+    const { marketId, side, amount, price, outcome } = req.body;
+
+    // Validate required fields
+    if (!marketId || !side || !amount || !price) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "marketId, side, amount, and price are required",
+      });
+    }
+
+    // Validate side
+    if (!['BUY', 'SELL'].includes(side.toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid side",
+        message: "side must be 'BUY' or 'SELL'",
+      });
+    }
+
+    // Use Python bridge to place order
+    const { getPythonBridge } = await import('../polymarket/pythonBridge.js');
+    const bridge = getPythonBridge();
+
+    const orderResult = await bridge.callFunction('place_order', {
+      market_id: marketId,
+      side: side.toUpperCase(),
+      amount: parseFloat(amount),
+      price: parseFloat(price),
+      outcome: outcome || 'YES',
+    });
+
+    if (!orderResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Order placement failed",
+        message: orderResult.error || "Unknown error",
+      });
+    }
+
+    // Broadcast order event via WebSocket
+    const wsService = getWebSocketService();
+    if (wsService) {
+      wsService.emitTradeExecuted({
+        platform: 'polymarket',
+        chain: 'polygon',
+        tradeId: orderResult.data?.orderId || `order_${Date.now()}`,
+        market: marketId,
+        amount: parseFloat(amount),
+        price: parseFloat(price),
+        outcome: 'success',
+      });
+    }
+
+    res.json({
+      success: true,
+      order: {
+        orderId: orderResult.data?.orderId,
+        marketId,
+        side,
+        amount: parseFloat(amount),
+        price: parseFloat(price),
+        outcome: outcome || 'YES',
+        status: orderResult.data?.status || 'pending',
+      },
+      message: "Order placed successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error placing Polymarket order:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to place order",
+      message: error.message
+    });
+  }
+});
+
+// Alias endpoints for backward compatibility
+
+/**
+ * POST /api/start-bot - Alias for /api/bot/start
+ */
+app.post("/api/start-bot", tradingLimiter, async (req, res) => {
+  req.body.type = req.body.type || 'all';
+  return app._router.handle(req, res, (err: any) => {
+    if (err) {
+      logger.error("Error in start-bot alias:", err);
+      res.status(500).json({ error: "Failed to start bot" });
+    }
+  });
+});
+
+/**
+ * POST /api/stop-bot - Alias for /api/bot/stop
+ */
+app.post("/api/stop-bot", tradingLimiter, async (req, res) => {
+  req.body.type = req.body.type || 'all';
+  return app._router.handle(req, res, (err: any) => {
+    if (err) {
+      logger.error("Error in stop-bot alias:", err);
+      res.status(500).json({ error: "Failed to stop bot" });
+    }
+  });
+});
+
+/**
+ * GET /api/bot/status - Alias for /api/bot/state
+ */
+app.get("/api/bot/status", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const cycleStatus = await orchestrator.getCycleStatus();
+
+    res.json({
+      success: true,
+      status: cycleStatus.isRunning ? 'running' : 'stopped',
+      uptime: cycleStatus.uptime,
+      config: cycleStatus.config,
+      lastCycle: cycleStatus.lastCycleResult,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting bot status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get bot status",
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// END API ARCHITECTURE STANDARD ENDPOINTS
+// =============================================================================
