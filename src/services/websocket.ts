@@ -234,6 +234,14 @@ export class WebSocketService {
     }
 
     /**
+     * Broadcast full bot status update
+     */
+    broadcastBotStatus(status: any): void {
+        logger.info('📡 Broadcasting bot status update');
+        this.io.emit('bot_status_update', status);
+    }
+
+    /**
      * Get number of connected clients
      */
     getConnectedClientsCount(): number {

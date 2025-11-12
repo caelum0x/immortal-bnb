@@ -1,263 +1,250 @@
-/**
- * Notifications Panel Component
- * Displays real-time WebSocket events with toast notifications
- */
-
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useWebSocketContext } from '../src/contexts/WebSocketContext';
-import { format } from 'date-fns';
+import { useEffect, useState } from 'react';
+import useWebSocket from '@/lib/useWebSocket';
 
-interface Toast {
+interface Notification {
   id: string;
-  type: 'success' | 'error' | 'info' | 'warning';
+  type: 'success' | 'error' | 'warning' | 'info';
   message: string;
   timestamp: number;
+  details?: string;
 }
 
 export default function NotificationsPanel() {
-  const { events, clearEvents, isConnected } = useWebSocketContext();
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [filter, setFilter] = useState<string>('all');
-  const [showToasts, setShowToasts] = useState(true);
+  const { isConnected, lastTrade, botStatus, newOpportunity } = useWebSocket();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isExpanded, setIsExpanded] = useState(true);
 
-  // Add toast notification
-  const addToast = (toast: Omit<Toast, 'id' | 'timestamp'>) => {
-    const newToast: Toast = {
-      ...toast,
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: Date.now(),
-    };
-    setToasts((prev) => [...prev, newToast]);
+  // Listen for new trades
+  useEffect(() => {
+    if (lastTrade) {
+      const isProfitable = (lastTrade.profit || 0) > 0;
+      addNotification({
+        type: isProfitable ? 'success' : 'warning',
+        message: `Trade ${lastTrade.status === 'SUCCESS' ? 'executed' : 'failed'}`,
+        details: `${lastTrade.tokenIn} → ${lastTrade.tokenOut} on ${lastTrade.chain}`,
+        timestamp: Date.now(),
+      });
+    }
+  }, [lastTrade]);
+
+  // Listen for bot status changes
+  useEffect(() => {
+    if (botStatus) {
+      const dexChanged = botStatus.dex.status;
+      const polyChanged = botStatus.polymarket.status;
+
+      if (dexChanged === 'RUNNING') {
+        addNotification({
+          type: 'success',
+          message: 'DEX Bot Started',
+          details: 'Trading bot is now active on BNB Chain',
+          timestamp: Date.now(),
+        });
+      } else if (dexChanged === 'STOPPED') {
+        addNotification({
+          type: 'info',
+          message: 'DEX Bot Stopped',
+          details: 'Trading bot has been stopped',
+          timestamp: Date.now(),
+        });
+      } else if (dexChanged === 'ERROR') {
+        addNotification({
+          type: 'error',
+          message: 'DEX Bot Error',
+          details: 'Trading bot encountered an error',
+          timestamp: Date.now(),
+        });
+      }
+
+      if (polyChanged === 'RUNNING') {
+        addNotification({
+          type: 'success',
+          message: 'Polymarket Bot Started',
+          details: 'Prediction market bot is now active',
+          timestamp: Date.now(),
+        });
+      } else if (polyChanged === 'STOPPED') {
+        addNotification({
+          type: 'info',
+          message: 'Polymarket Bot Stopped',
+          details: 'Prediction market bot has been stopped',
+          timestamp: Date.now(),
+        });
+      }
+    }
+  }, [botStatus]);
+
+  // Listen for new opportunities
+  useEffect(() => {
+    if (newOpportunity) {
+      addNotification({
+        type: 'info',
+        message: `New ${newOpportunity.type} opportunity found!`,
+        details: `Expected profit: ${newOpportunity.expectedProfit.toFixed(4)} (${(newOpportunity.confidence * 100).toFixed(0)}% confidence)`,
+        timestamp: Date.now(),
+      });
+    }
+  }, [newOpportunity]);
+
+  const addNotification = (notification: Omit<Notification, 'id'>) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setNotifications((prev) => [{ id, ...notification }, ...prev].slice(0, 10)); // Keep last 10
 
     // Auto-remove after 5 seconds
     setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== newToast.id));
+      removeNotification(id);
     }, 5000);
   };
 
-  // Listen for new events and create toasts
-  useEffect(() => {
-    if (!showToasts || events.length === 0) return;
+  const removeNotification = (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  };
 
-    const latestEvent = events[0];
-    let toastMessage = '';
-    let toastType: 'success' | 'error' | 'info' | 'warning' = 'info';
+  const clearAll = () => {
+    setNotifications([]);
+  };
 
-    switch (latestEvent.type) {
-      case 'trade':
-        toastMessage = `Trade ${latestEvent.outcome}: ${latestEvent.platform}`;
-        toastType = latestEvent.outcome === 'success' ? 'success' : 'error';
-        break;
-      case 'bot-status':
-        toastMessage = `Bot ${latestEvent.platform}: ${latestEvent.status}`;
-        toastType = latestEvent.status === 'running' ? 'success' : 'warning';
-        break;
-      case 'opportunity':
-        toastMessage = `New opportunity on ${latestEvent.platform}`;
-        toastType = 'info';
-        break;
-      case 'memory':
-        toastMessage = `Memory ${latestEvent.action}`;
-        toastType = 'info';
-        break;
-      case 'balance':
-        toastMessage = `Balance updated: ${latestEvent.token}`;
-        toastType = latestEvent.change >= 0 ? 'success' : 'warning';
-        break;
-    }
-
-    if (toastMessage) {
-      addToast({ type: toastType, message: toastMessage });
-    }
-  }, [events]);
-
-  // Filter events
-  const filteredEvents = filter === 'all'
-    ? events
-    : events.filter(event => event.type === filter);
-
-  const getEventIcon = (type: string) => {
+  const getIcon = (type: Notification['type']) => {
     switch (type) {
-      case 'trade': return '💱';
-      case 'bot-status': return '🤖';
-      case 'opportunity': return '💡';
-      case 'memory': return '💾';
-      case 'balance': return '💰';
-      default: return '📢';
+      case 'success':
+        return '✓';
+      case 'error':
+        return '✕';
+      case 'warning':
+        return '⚠';
+      case 'info':
+        return 'ℹ';
     }
   };
 
-  const getEventColor = (event: any) => {
-    switch (event.type) {
-      case 'trade':
-        return event.outcome === 'success' ? 'green' : 'red';
-      case 'bot-status':
-        return event.status === 'running' ? 'green' : event.status === 'stopped' ? 'gray' : 'red';
-      case 'opportunity':
-        return 'blue';
-      case 'memory':
-        return 'purple';
-      case 'balance':
-        return event.change >= 0 ? 'green' : 'orange';
-      default:
-        return 'gray';
-    }
-  };
-
-  const getToastIcon = (type: string) => {
+  const getColor = (type: Notification['type']) => {
     switch (type) {
-      case 'success': return '✅';
-      case 'error': return '❌';
-      case 'warning': return '⚠️';
-      case 'info': return 'ℹ️';
-      default: return '📢';
-    }
-  };
-
-  const getToastColor = (type: string) => {
-    switch (type) {
-      case 'success': return 'bg-green-500';
-      case 'error': return 'bg-red-500';
-      case 'warning': return 'bg-orange-500';
-      case 'info': return 'bg-blue-500';
-      default: return 'bg-gray-500';
+      case 'success':
+        return 'from-green-500/20 to-emerald-500/20 border-green-500/30 text-green-400';
+      case 'error':
+        return 'from-red-500/20 to-rose-500/20 border-red-500/30 text-red-400';
+      case 'warning':
+        return 'from-yellow-500/20 to-orange-500/20 border-yellow-500/30 text-yellow-400';
+      case 'info':
+        return 'from-blue-500/20 to-cyan-500/20 border-blue-500/30 text-blue-400';
     }
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-            🔔 Live Notifications
-          </h2>
-          <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowToasts(!showToasts)}
-            className="px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600"
-          >
-            {showToasts ? '🔕 Mute' : '🔔 Unmute'}
-          </button>
-          <button
-            onClick={clearEvents}
-            className="px-3 py-1 text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900/50"
-          >
-            🗑️ Clear
-          </button>
-        </div>
-      </div>
+    <div className="relative">
+      {/* Glassmorphism Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 rounded-2xl backdrop-blur-xl" />
 
-      {/* Filter Buttons */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {['all', 'trade', 'bot-status', 'opportunity', 'memory', 'balance'].map((filterType) => (
-          <button
-            key={filterType}
-            onClick={() => setFilter(filterType)}
-            className={`px-3 py-1 text-sm rounded-md transition-colors ${
-              filter === filterType
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-            }`}
-          >
-            {filterType === 'all' ? '🌐 All' : `${getEventIcon(filterType)} ${filterType}`}
-          </button>
-        ))}
-      </div>
-
-      {/* Events List */}
-      <div className="space-y-2 max-h-96 overflow-y-auto">
-        {filteredEvents.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            <p className="text-4xl mb-2">📭</p>
-            <p>No notifications yet</p>
-            <p className="text-sm mt-1">Events will appear here when they occur</p>
+      <div className="relative bg-slate-800/50 backdrop-blur-xl border border-indigo-500/20 rounded-2xl p-6 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-lg">
+              <span className="text-xl">🔔</span>
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Notifications</h2>
+              <div className="flex items-center gap-2 mt-1">
+                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+                <span className="text-xs text-slate-400">
+                  {isConnected ? 'Live' : 'Disconnected'}
+                </span>
+              </div>
+            </div>
           </div>
-        ) : (
-          filteredEvents.map((event, index) => {
-            const color = getEventColor(event);
-            return (
-              <div
-                key={index}
-                className={`p-3 rounded-lg border-l-4 border-${color}-500 bg-${color}-50 dark:bg-${color}-900/20`}
+          <div className="flex items-center gap-2">
+            {notifications.length > 0 && (
+              <button
+                onClick={clearAll}
+                className="px-3 py-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg text-xs font-medium transition-colors"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-2 flex-1">
-                    <span className="text-xl">{getEventIcon(event.type)}</span>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900 dark:text-white">
-                        {event.type === 'trade' && `Trade ${event.outcome} on ${event.platform}`}
-                        {event.type === 'bot-status' && `Bot ${event.status}: ${event.platform}`}
-                        {event.type === 'opportunity' && `New opportunity: ${event.description}`}
-                        {event.type === 'memory' && `Memory ${event.action}`}
-                        {event.type === 'balance' && `Balance change: ${event.token}`}
-                      </p>
-                      {event.type === 'trade' && event.pnl && (
-                        <p className={`text-sm mt-1 ${event.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          P&L: {event.pnl >= 0 ? '+' : ''}{event.pnl.toFixed(4)}
-                        </p>
-                      )}
-                      {event.type === 'opportunity' && (
-                        <p className="text-sm mt-1 text-gray-600 dark:text-gray-400">
-                          Confidence: {(event.confidence * 100).toFixed(0)}%
-                          {event.potentialProfit && ` | Potential: $${event.potentialProfit.toFixed(2)}`}
-                        </p>
-                      )}
-                      {event.type === 'balance' && (
-                        <p className={`text-sm mt-1 ${event.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {event.change >= 0 ? '+' : ''}{event.change.toFixed(4)} {event.token}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        {format(event.timestamp, 'MMM dd, yyyy HH:mm:ss')}
-                      </p>
+                Clear All
+              </button>
+            )}
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+            >
+              {isExpanded ? '▼ Collapse' : '▶ Expand'}
+            </button>
+          </div>
+        </div>
+
+        {/* Notifications List */}
+        {isExpanded && (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-5xl mb-3">🔕</div>
+                <p className="text-slate-400 text-sm">No notifications yet</p>
+                <p className="text-slate-500 text-xs mt-1">
+                  You'll see real-time updates here when trading
+                </p>
+              </div>
+            ) : (
+              notifications.map((notification, index) => (
+                <div
+                  key={notification.id}
+                  className={`relative group animate-slide-in-top`}
+                  style={{ animationDelay: `${index * 50}ms` }}
+                >
+                  <div className={`absolute inset-0 bg-gradient-to-r ${getColor(notification.type).split(' ')[0]} ${getColor(notification.type).split(' ')[1]} rounded-lg blur opacity-50`} />
+                  <div className={`relative bg-slate-800/80 backdrop-blur-sm border ${getColor(notification.type).split(' ')[2]} rounded-lg p-3`}>
+                    <div className="flex items-start gap-3">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${getColor(notification.type).split(' ')[0]} ${getColor(notification.type).split(' ')[1]} border ${getColor(notification.type).split(' ')[2]}`}>
+                        <span className="text-xs font-bold">{getIcon(notification.type)}</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className={`font-semibold text-sm ${getColor(notification.type).split(' ')[3]}`}>
+                          {notification.message}
+                        </div>
+                        {notification.details && (
+                          <div className="text-xs text-slate-400 mt-1">
+                            {notification.details}
+                          </div>
+                        )}
+                        <div className="text-xs text-slate-500 mt-1">
+                          {new Date(notification.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeNotification(notification.id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-white"
+                      >
+                        <span className="text-lg">×</span>
+                      </button>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Footer Stats */}
+        {!isExpanded && notifications.length > 0 && (
+          <div className="text-center text-sm text-slate-400">
+            {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
+          </div>
         )}
       </div>
 
-      {/* Toast Notifications */}
-      <div className="fixed bottom-4 right-4 z-50 space-y-2">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`${getToastColor(toast.type)} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[300px] animate-slide-in`}
-          >
-            <span className="text-xl">{getToastIcon(toast.type)}</span>
-            <div className="flex-1">
-              <p className="font-medium">{toast.message}</p>
-            </div>
-            <button
-              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-              className="text-white/80 hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-      </div>
-
       <style jsx>{`
-        @keyframes slide-in {
+        @keyframes slide-in-top {
           from {
-            transform: translateX(100%);
             opacity: 0;
+            transform: translateY(-10px);
           }
           to {
-            transform: translateX(0);
             opacity: 1;
+            transform: translateY(0);
           }
         }
-        .animate-slide-in {
-          animation: slide-in 0.3s ease-out;
+
+        .animate-slide-in-top {
+          animation: slide-in-top 0.3s ease-out forwards;
         }
       `}</style>
     </div>

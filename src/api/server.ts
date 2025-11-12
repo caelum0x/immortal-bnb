@@ -1115,18 +1115,24 @@ app.get('/api/unified/status', async (req: Request, res: Response) => {
 
     res.json({
       dex: {
-        status: 'operational',
+        status: botState.dex.status,
+        lastTrade: botState.dex.lastTrade,
         balance: dexBalance,
         chain: CONFIG.IS_OPBNB ? 'opbnb' : 'bnb',
         network: CONFIG.IS_MAINNET ? 'mainnet' : 'testnet',
+        config: botState.dex.config,
       },
       polymarket: pythonStatus ? {
-        status: pythonStatus.status,
+        status: botState.polymarket.status,
+        lastTrade: botState.polymarket.lastTrade,
         agents: pythonStatus.agents,
         environment: pythonStatus.environment,
+        config: botState.polymarket.config,
       } : {
-        status: 'unavailable',
+        status: botState.polymarket.status,
+        lastTrade: botState.polymarket.lastTrade,
         message: 'Python API is not running',
+        config: botState.polymarket.config,
       },
       websocket: {
         connected: getWebSocketService()?.getConnectedClientsCount() || 0,
@@ -1584,6 +1590,192 @@ app.get("/api/mev/check-sandwich/:txHash", readLimiter, async (req, res) => {
   } catch (error) {
     logger.error("Error checking sandwich attack:", error);
     res.status(500).json({ error: "Failed to check sandwich", message: error.message });
+  }
+});
+
+// Bot Control Endpoints
+
+// Global bot state
+let botState = {
+  dex: {
+    status: 'STOPPED' as 'RUNNING' | 'STOPPED' | 'ERROR',
+    lastTrade: null as number | null,
+    config: {
+      maxTradeAmount: 1.0,
+      confidenceThreshold: 0.7,
+      stopLoss: 0.05,
+      maxSlippage: 0.01,
+    }
+  },
+  polymarket: {
+    status: 'STOPPED' as 'RUNNING' | 'STOPPED' | 'ERROR',
+    lastTrade: null as number | null,
+    config: {
+      maxBetAmount: 100,
+      confidenceThreshold: 0.75,
+      maxSlippage: 0.02,
+    }
+  }
+};
+
+// Start bot endpoint
+app.post("/api/bot/start", tradingLimiter, async (req, res) => {
+  try {
+    const { type } = req.body;
+
+    if (!type || !['dex', 'polymarket', 'all'].includes(type)) {
+      return res.status(400).json({ error: "Invalid bot type. Must be 'dex', 'polymarket', or 'all'" });
+    }
+
+    const wsService = getWebSocketService();
+
+    if (type === 'dex' || type === 'all') {
+      botState.dex.status = 'RUNNING';
+      logger.info('🚀 DEX bot started');
+
+      // Emit WebSocket event
+      if (wsService) {
+        wsService.broadcastBotStatus({
+          dex: botState.dex,
+          polymarket: botState.polymarket
+        });
+      }
+    }
+
+    if (type === 'polymarket' || type === 'all') {
+      // Start Polymarket bot via Python bridge
+      const pythonBridge = getPythonBridge();
+      try {
+        await pythonBridge.startAgent('market_analyzer');
+        botState.polymarket.status = 'RUNNING';
+        logger.info('🎲 Polymarket bot started');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.warn('Polymarket bot failed to start:', error);
+        botState.polymarket.status = 'ERROR';
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${type.toUpperCase()} bot started successfully`,
+      status: {
+        dex: botState.dex.status,
+        polymarket: botState.polymarket.status,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error starting bot:", error);
+    res.status(500).json({ error: "Failed to start bot", message: error.message });
+  }
+});
+
+// Stop bot endpoint
+app.post("/api/bot/stop", tradingLimiter, async (req, res) => {
+  try {
+    const { type } = req.body;
+
+    if (!type || !['dex', 'polymarket', 'all'].includes(type)) {
+      return res.status(400).json({ error: "Invalid bot type. Must be 'dex', 'polymarket', or 'all'" });
+    }
+
+    const wsService = getWebSocketService();
+
+    if (type === 'dex' || type === 'all') {
+      botState.dex.status = 'STOPPED';
+      logger.info('🛑 DEX bot stopped');
+
+      // Emit WebSocket event
+      if (wsService) {
+        wsService.broadcastBotStatus({
+          dex: botState.dex,
+          polymarket: botState.polymarket
+        });
+      }
+    }
+
+    if (type === 'polymarket' || type === 'all') {
+      // Stop Polymarket bot via Python bridge
+      const pythonBridge = getPythonBridge();
+      try {
+        await pythonBridge.stopAgent('market_analyzer');
+        botState.polymarket.status = 'STOPPED';
+        logger.info('🎲 Polymarket bot stopped');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.warn('Polymarket bot stop failed:', error);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${type.toUpperCase()} bot stopped successfully`,
+      status: {
+        dex: botState.dex.status,
+        polymarket: botState.polymarket.status,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error stopping bot:", error);
+    res.status(500).json({ error: "Failed to stop bot", message: error.message });
+  }
+});
+
+// Update bot configuration
+app.post("/api/bot/config", tradingLimiter, async (req, res) => {
+  try {
+    const { type, config } = req.body;
+
+    if (!type || !['dex', 'polymarket'].includes(type)) {
+      return res.status(400).json({ error: "Invalid bot type. Must be 'dex' or 'polymarket'" });
+    }
+
+    if (type === 'dex') {
+      botState.dex.config = { ...botState.dex.config, ...config };
+      logger.info('⚙️ DEX bot config updated:', config);
+    } else {
+      botState.polymarket.config = { ...botState.polymarket.config, ...config };
+      logger.info('⚙️ Polymarket bot config updated:', config);
+    }
+
+    res.json({
+      success: true,
+      message: 'Bot configuration updated',
+      config: type === 'dex' ? botState.dex.config : botState.polymarket.config,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error updating bot config:", error);
+    res.status(500).json({ error: "Failed to update config", message: error.message });
+  }
+});
+
+// Get bot state
+app.get("/api/bot/state", async (req, res) => {
+  try {
+    res.json({
+      state: botState,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting bot state:", error);
+    res.status(500).json({ error: "Failed to get bot state", message: error.message });
   }
 });
 
