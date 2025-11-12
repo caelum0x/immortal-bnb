@@ -13,6 +13,9 @@ import DashboardScreen from './src/screens/DashboardScreen';
 import TradesScreen from './src/screens/TradesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import BotControlScreen from './src/screens/BotControlScreen';
+import PortfolioScreen from './src/screens/PortfolioScreen';
+import AnalyticsScreen from './src/screens/AnalyticsScreen';
+import OpportunitiesScreen from './src/screens/OpportunitiesScreen';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -73,6 +76,21 @@ export default function App() {
           name="Settings"
           component={SettingsScreen}
           options={{ title: 'Settings' }}
+        />
+        <Stack.Screen
+          name="Portfolio"
+          component={PortfolioScreen}
+          options={{ title: 'Portfolio' }}
+        />
+        <Stack.Screen
+          name="Analytics"
+          component={AnalyticsScreen}
+          options={{ title: 'Analytics' }}
+        />
+        <Stack.Screen
+          name="Opportunities"
+          component={OpportunitiesScreen}
+          options={{ title: 'Opportunities' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
