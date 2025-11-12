@@ -1715,15 +1715,27 @@ app.post("/api/bot/start", tradingLimiter, async (req, res) => {
     const wsService = getWebSocketService();
 
     if (type === 'dex' || type === 'all') {
-      botState.dex.status = 'RUNNING';
-      logger.info('🚀 DEX bot started');
+      // Start Trading Orchestrator for DEX trading
+      const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+      const orchestrator = getTradingOrchestrator();
 
-      // Emit WebSocket event
-      if (wsService) {
-        wsService.broadcastBotStatus({
-          dex: botState.dex,
-          polymarket: botState.polymarket
-        });
+      try {
+        await orchestrator.start();
+        botState.dex.status = 'RUNNING';
+        botState.dex.lastTrade = Date.now();
+        logger.info('🚀 DEX Trading Orchestrator started');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to start DEX orchestrator:', error);
+        botState.dex.status = 'ERROR';
+        throw error;
       }
     }
 
@@ -1731,8 +1743,9 @@ app.post("/api/bot/start", tradingLimiter, async (req, res) => {
       // Start Polymarket bot via Python bridge
       const pythonBridge = getPythonBridge();
       try {
-        await pythonBridge.startAgent('market_analyzer');
+        await pythonBridge.runTradingStrategy();
         botState.polymarket.status = 'RUNNING';
+        botState.polymarket.lastTrade = Date.now();
         logger.info('🎲 Polymarket bot started');
 
         // Emit WebSocket event
@@ -1775,15 +1788,26 @@ app.post("/api/bot/stop", tradingLimiter, async (req, res) => {
     const wsService = getWebSocketService();
 
     if (type === 'dex' || type === 'all') {
-      botState.dex.status = 'STOPPED';
-      logger.info('🛑 DEX bot stopped');
+      // Stop Trading Orchestrator
+      const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+      const orchestrator = getTradingOrchestrator();
 
-      // Emit WebSocket event
-      if (wsService) {
-        wsService.broadcastBotStatus({
-          dex: botState.dex,
-          polymarket: botState.polymarket
-        });
+      try {
+        await orchestrator.stop();
+        botState.dex.status = 'STOPPED';
+        logger.info('🛑 DEX Trading Orchestrator stopped');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to stop DEX orchestrator:', error);
+        botState.dex.status = 'ERROR';
+        // Continue to allow response
       }
     }
 
@@ -1832,8 +1856,18 @@ app.post("/api/bot/config", tradingLimiter, async (req, res) => {
     }
 
     if (type === 'dex') {
-      botState.dex.config = { ...botState.dex.config, ...config };
-      logger.info('⚙️ DEX bot config updated:', config);
+      // Update Trading Orchestrator config
+      const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+      const orchestrator = getTradingOrchestrator();
+
+      try {
+        await orchestrator.updateConfig(config);
+        botState.dex.config = { ...botState.dex.config, ...config };
+        logger.info('⚙️ DEX Trading Orchestrator config updated:', config);
+      } catch (error) {
+        logger.error('Failed to update DEX orchestrator config:', error);
+        throw error;
+      }
     } else {
       botState.polymarket.config = { ...botState.polymarket.config, ...config };
       logger.info('⚙️ Polymarket bot config updated:', config);
@@ -1861,6 +1895,63 @@ app.get("/api/bot/state", async (req, res) => {
   } catch (error) {
     logger.error("Error getting bot state:", error);
     res.status(500).json({ error: "Failed to get bot state", message: error.message });
+  }
+});
+
+// Get performance metrics
+app.get("/api/bot/performance", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const performance = await orchestrator.getPerformance();
+
+    res.json({
+      success: true,
+      performance,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting performance metrics:", error);
+    res.status(500).json({ error: "Failed to get performance metrics", message: error.message });
+  }
+});
+
+// Get risk status
+app.get("/api/bot/risk-status", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const riskStatus = await orchestrator.getRiskStatus();
+
+    res.json({
+      success: true,
+      riskStatus,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting risk status:", error);
+    res.status(500).json({ error: "Failed to get risk status", message: error.message });
+  }
+});
+
+// Get current trading cycle status
+app.get("/api/bot/trading-cycle", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const cycleStatus = await orchestrator.getCycleStatus();
+
+    res.json({
+      success: true,
+      cycleStatus,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting trading cycle status:", error);
+    res.status(500).json({ error: "Failed to get trading cycle status", message: error.message });
   }
 });
 
