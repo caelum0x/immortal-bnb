@@ -4,3 +4,9 @@
 [submodule "agents"]
 	path = agents
 	url = https://github.com/Polymarket/agents.git
+[submodule "polymarket-examples"]
+	path = polymarket-examples
+	url = https://github.com/Polymarket/examples.git
+[submodule "polymarket-realtime"]
+	path = polymarket-realtime
+	url = https://github.com/Polymarket/real-time-data-client.git

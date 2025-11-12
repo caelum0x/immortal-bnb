@@ -6,8 +6,18 @@ This project uses Git submodules to include external repositories.
 
 ### 1. `agents/` - Polymarket Agents
 - **Repository:** https://github.com/Polymarket/agents.git
-- **Purpose:** Polymarket prediction market integration
+- **Purpose:** Polymarket prediction market agents and strategies
 - **Documentation:** See `agents/README.md`
+
+### 2. `polymarket-examples/` - Polymarket Examples
+- **Repository:** https://github.com/Polymarket/examples.git
+- **Purpose:** Example implementations and use cases for Polymarket integration
+- **Documentation:** See `polymarket-examples/README.md`
+
+### 3. `polymarket-realtime/` - Polymarket Real-Time Data Client
+- **Repository:** https://github.com/Polymarket/real-time-data-client.git
+- **Purpose:** Real-time market data streaming and WebSocket client
+- **Documentation:** See `polymarket-realtime/README.md`
 
 ## Working with Submodules
 
