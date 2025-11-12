@@ -68,6 +68,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^2.0.63",
     "@bnb-chain/greenfield-js-sdk": "^2.0.0",
+    "@flashbots/ethers-provider-bundle": "^1.0.0",
     "@openrouter/ai-sdk-provider": "^1.2.0",
     "@pancakeswap/chains": "^0.7.0",
     "@pancakeswap/price-api-sdk": "^11.1.1",
