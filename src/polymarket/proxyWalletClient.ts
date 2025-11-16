@@ -22,14 +22,14 @@ interface ProxyWalletConfig {
 
 export class ProxyWalletClient {
   private wallet: ethers.Wallet | null = null;
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.JsonRpcProvider;
   private proxyAddress: string | null = null;
   private email: string | null = null;
 
   constructor() {
     // Initialize Polygon provider
-    const rpcUrl = CONFIG.POLYMARKET_RPC_URL || 'https://polygon-rpc.com';
-    this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+    const rpcUrl = CONFIG.POLYGON_RPC || CONFIG.POLYGON_TESTNET_RPC || 'https://polygon-rpc.com';
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
   }
 
   /**
@@ -83,13 +83,15 @@ export class ProxyWalletClient {
         usdcAddress,
         ['function balanceOf(address) view returns (uint256)'],
         this.provider
-      );
+      ) as ethers.Contract & {
+        balanceOf: (address: string) => Promise<bigint>;
+      };
 
       const usdcBalance = await usdcContract.balanceOf(this.proxyAddress);
 
       return {
-        matic: parseFloat(ethers.utils.formatEther(maticBalance)),
-        usdc: parseFloat(ethers.utils.formatUnits(usdcBalance, 6)), // USDC has 6 decimals
+        matic: parseFloat(ethers.formatEther(maticBalance)),
+        usdc: parseFloat(ethers.formatUnits(usdcBalance, 6)), // USDC has 6 decimals
       };
     } catch (error) {
       logger.error('Failed to get balance:', error);
@@ -202,8 +204,8 @@ export class ProxyWalletClient {
   private async executeProxyTransaction(
     target: string,
     data: string,
-    value: ethers.BigNumber = ethers.BigNumber.from(0)
-  ): Promise<ethers.ContractTransaction> {
+    value: bigint = 0n
+  ): Promise<ethers.ContractTransactionResponse> {
     if (!this.wallet || !this.proxyAddress) {
       throw new Error('Wallet not initialized');
     }

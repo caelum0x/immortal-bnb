@@ -184,9 +184,11 @@ export class PerformanceTracker {
     });
 
     // Calculate average trade time (time between trades)
+    const lastTrade = this.trades[this.trades.length - 1];
+    const firstTrade = this.trades[0];
     const avgTradeTime =
-      this.trades.length > 1
-        ? (this.trades[this.trades.length - 1].timestamp - this.trades[0].timestamp) /
+      this.trades.length > 1 && lastTrade && firstTrade
+        ? (lastTrade.timestamp - firstTrade.timestamp) /
           (this.trades.length - 1)
         : 0;
 
@@ -271,6 +273,8 @@ export class PerformanceTracker {
     this.trades.forEach((trade) => {
       const date = new Date(trade.timestamp);
       const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      if (!dateKey) return;
 
       const existing = series.get(dateKey) || {
         date: dateKey,
@@ -294,7 +298,7 @@ export class PerformanceTracker {
     series.forEach((metrics, date) => {
       const dayTrades = this.trades.filter((t) => {
         const tradeDate = new Date(t.timestamp).toISOString().split('T')[0];
-        return tradeDate === date;
+        return tradeDate && tradeDate === date;
       });
       const successful = dayTrades.filter((t) => t.success).length;
       metrics.successRate = dayTrades.length > 0 ? (successful / dayTrades.length) * 100 : 0;

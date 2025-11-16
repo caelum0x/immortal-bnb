@@ -4,7 +4,8 @@
  * Provides real-time market intelligence for trading bot
  */
 
-import { RealTimeDataClient, Message, ConnectionStatus } from '../../polymarket-realtime/src';
+import { RealTimeDataClient, ConnectionStatus } from '../../polymarket-realtime/src';
+import type { Message } from '../../polymarket-realtime/src';
 import { logger } from '../utils/logger';
 import { getWebSocketService } from '../services/websocket';
 import {
@@ -12,6 +13,10 @@ import {
     ActivityTypes,
     ClobMarketTypes,
     PriceTypes,
+    CryptoSymbols,
+    EquitySymbols,
+} from './realTimeTypes';
+import type {
     Trade,
     CryptoPrice,
     EquityPrice,
@@ -20,8 +25,6 @@ import {
     AggOrderbook,
     Order,
     UserTrade,
-    CryptoSymbols,
-    EquitySymbols,
 } from './realTimeTypes';
 
 export interface RealTimeServiceConfig {
@@ -320,7 +323,7 @@ export class PolymarketRealTimeService {
                         });
                     } else if (message.type === ClobMarketTypes.PRICE_CHANGE) {
                         const priceChanges = payload as PriceChanges;
-                        if (priceChanges.pc && priceChanges.pc.length > 0) {
+                        if (priceChanges.pc && priceChanges.pc.length > 0 && priceChanges.pc[0]) {
                             wsService.broadcast({
                                 type: 'price-update',
                                 token: priceChanges.m,
@@ -334,7 +337,7 @@ export class PolymarketRealTimeService {
 
                 case Topics.CLOB_USER:
                     // User-specific order and trade updates
-                    wsService.io.emit('polymarket-user-event', {
+                    wsService.emitCustomEvent('polymarket-user-event', {
                         type: message.type,
                         payload: message.payload,
                         timestamp: message.timestamp,
@@ -354,7 +357,7 @@ export class PolymarketRealTimeService {
         if (!wsService) return;
 
         // Broadcast raw Polymarket message to all clients
-        wsService.io.emit('polymarket-event', {
+        wsService.emitCustomEvent('polymarket-event', {
             topic: message.topic,
             type: message.type,
             payload: message.payload,

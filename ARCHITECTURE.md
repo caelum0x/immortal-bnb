@@ -152,6 +152,329 @@ const pastTrades = await fetchMemories();
    └─> Continuous improvement!
 ```
 
+## Directory Structure & Connections
+
+### Complete Directory Map
+
+```
+immortal-bnb-1/
+│
+├── 📁 src/                          # Core Backend Logic
+│   ├── 📁 agent/                    # AI Decision Layer
+│   │   ├── aiDecision.ts           → Uses: config, logger, memoryStorage, marketFetcher
+│   │   └── learningLoop.ts         → Uses: memoryStorage, types
+│   │
+│   ├── 📁 ai/                       # Advanced AI Systems
+│   │   ├── immortalAgent.ts        → Uses: memoryStorage, llmInterface, config
+│   │   ├── llmInterface.ts          → Uses: config, prompt
+│   │   ├── orchestrator.ts        → Uses: immortalAgent, tradeExecutor
+│   │   ├── tradingOrchestrator.ts  → Uses: immortalAgent, marketFetcher
+│   │   ├── crossChainStrategy.ts   → Uses: config, marketFetcher
+│   │   └── strategyEvolution.ts    → Uses: memoryStorage, immortalAgent
+│   │
+│   ├── 📁 blockchain/               # Blockchain Interactions
+│   │   ├── tradeExecutor.ts         → Uses: pancakeSwapIntegration, safeguards, config
+│   │   ├── memoryStorage.ts         → Uses: greenfield SDK, config, logger
+│   │   ├── pancakeSwapIntegration.ts → Uses: ethers, pancakeswap SDK, config
+│   │   ├── tokenDiscovery.ts        → Uses: marketFetcher, config
+│   │   ├── dynamicTokenDiscovery.ts → Uses: marketFetcher, config
+│   │   ├── smartTradingEngine.ts    → Uses: tradeExecutor, safeguards
+│   │   └── crossChain.ts            → Uses: wormholeService, config
+│   │
+│   ├── 📁 data/                     # Market Data Layer
+│   │   ├── marketFetcher.ts         → Uses: node-fetch, config, logger
+│   │   ├── dynamicMarketFetcher.ts   → Uses: marketFetcher, config
+│   │   └── enhancedMarketFetcher.ts  → Uses: marketFetcher, config
+│   │
+│   ├── 📁 api/                      # REST API Server
+│   │   ├── server.ts                → Uses: bot-state, tradeExecutor, memoryStorage
+│   │   ├── crossChainRoutes.ts      → Uses: crossChain, config
+│   │   └── telegramRoutes.ts        → Uses: telegramBot, config
+│   │
+│   ├── 📁 alerts/                   # Notifications
+│   │   └── telegramBot.ts           → Uses: telegraf, config, logger
+│   │
+│   ├── 📁 utils/                    # Shared Utilities
+│   │   ├── logger.ts                → Uses: winston, config
+│   │   ├── safeguards.ts            → Uses: config, logger
+│   │   ├── errorHandler.ts          → Uses: logger
+│   │   └── retry.ts                 → Uses: logger
+│   │
+│   ├── 📁 polymarket/               # Polymarket Integration
+│   │   ├── polymarketClient.ts      → Uses: @polymarket/clob-client
+│   │   ├── unifiedWalletManager.ts  → Uses: proxyWalletClient, safeWalletClient
+│   │   └── aiPredictionAnalyzer.ts  → Uses: llmInterface, config
+│   │
+│   ├── 📁 services/                 # Background Services
+│   │   ├── tradingLoop.ts            → Uses: immortalAgent, tradeExecutor
+│   │   └── positionManager.ts       → Uses: tradeExecutor, memoryStorage
+│   │
+│   ├── index.ts                     # Main Entry Point
+│   │   → Imports: All core modules above
+│   │   → Orchestrates: Bot lifecycle, trading loop
+│   │
+│   ├── config.ts                    # Configuration (Used by EVERYTHING)
+│   ├── prompt.ts                    # AI Prompt Templates
+│   └── bot-state.ts                 # State Management (Used by API)
+│
+├── 📁 frontend/                     # Next.js Dashboard
+│   ├── 📁 app/                      # Next.js App Router Pages
+│   │   ├── page.tsx                 → Uses: lib/api.ts, components
+│   │   ├── dashboard/page.tsx       → Uses: components/dashboard/
+│   │   └── memory/page.tsx         → Uses: components/MemoriesView.tsx
+│   │
+│   ├── 📁 components/               # React Components
+│   │   ├── dashboard/               → Uses: hooks/useBot.ts, lib/api.ts
+│   │   ├── MemoriesView.tsx        → Uses: lib/api.ts (GET /api/memories)
+│   │   └── TokenDiscovery.tsx      → Uses: lib/api.ts (GET /api/discover-tokens)
+│   │
+│   ├── 📁 lib/                      # Frontend Utilities
+│   │   ├── api.ts                   → Connects to: http://localhost:3001/api/*
+│   │   └── apiClient.ts             → HTTP client for backend
+│   │
+│   └── 📁 hooks/                     # React Hooks
+│       ├── useBot.ts                → Uses: lib/api.ts
+│       └── usePolling.ts            → Auto-refresh data
+│
+├── 📁 contracts/                    # Smart Contracts
+│   ├── IMMBotToken.sol              # ERC20 Token
+│   └── Staking.sol                  # Staking Contract
+│
+├── 📁 tests/                        # Test Files
+│   └── *.test.ts                    → Tests: src/** modules
+│
+├── 📁 scripts/                      # Utility Scripts
+│   └── *.ts                         → Uses: src/** modules
+│
+├── index.ts                         # Alternative Entry (uses src/index.ts)
+├── start-bot.ts                     # Startup Script
+└── config.ts                        # Root Config (re-exports src/config.ts)
+```
+
+### Component Dependency Graph
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ENTRY POINTS                             │
+├─────────────────────────────────────────────────────────────┤
+│  index.ts / start-bot.ts                                    │
+│    ↓                                                         │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  src/index.ts (Main Orchestrator)                     │  │
+│  │    ├─> ImmortalAIAgent                                │  │
+│  │    ├─> TradeExecutor                                  │  │
+│  │    ├─> startAPIServer()                               │  │
+│  │    └─> initializeStorage()                            │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│              CORE COMPONENTS (src/)                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────┐      ┌──────────────┐                  │
+│  │  config.ts   │◄─────┤  EVERYTHING  │                  │
+│  │  (Central)   │      │  (Imports)    │                  │
+│  └──────────────┘      └──────────────┘                  │
+│         │                                                   │
+│         ├─> ai/immortalAgent.ts                            │
+│         │     ├─> Uses: memoryStorage, llmInterface       │
+│         │     └─> Uses: marketFetcher (via orchestrator) │
+│         │                                                   │
+│         ├─> blockchain/tradeExecutor.ts                    │
+│         │     ├─> Uses: pancakeSwapIntegration            │
+│         │     ├─> Uses: utils/safeguards                  │
+│         │     └─> Uses: utils/logger                      │
+│         │                                                   │
+│         ├─> blockchain/memoryStorage.ts                    │
+│         │     ├─> Uses: @bnb-chain/greenfield-js-sdk      │
+│         │     └─> Uses: config, logger                     │
+│         │                                                   │
+│         ├─> data/marketFetcher.ts                          │
+│         │     ├─> Uses: node-fetch (DexScreener API)       │
+│         │     └─> Uses: config, logger                     │
+│         │                                                   │
+│         └─> api/server.ts                                  │
+│               ├─> Uses: bot-state.ts                       │
+│               ├─> Uses: tradeExecutor                       │
+│               └─> Uses: memoryStorage                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│              FRONTEND (frontend/)                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  frontend/lib/api.ts                                 │  │
+│  │    └─> HTTP Client                                   │  │
+│  │         └─> Connects to: http://localhost:3001/api/* │  │
+│  └──────────────────────────────────────────────────────┘  │
+│         │                                                   │
+│         ├─> components/dashboard/                           │
+│         │     └─> Uses: hooks/useBot.ts                    │
+│         │           └─> Uses: lib/api.ts                    │
+│         │                                                   │
+│         └─> app/page.tsx (Next.js Pages)                  │
+│               └─> Uses: components/**                      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Frontend ↔ Backend Connection Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  FRONTEND (Next.js - Port 3000)                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  User Action (Click "Start Bot")                            │
+│    ↓                                                         │
+│  frontend/lib/api.ts                                        │
+│    └─> POST http://localhost:3001/api/start-bot            │
+│         { tokens: [...], riskLevel: 5 }                     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                            ↓ HTTP REST
+┌─────────────────────────────────────────────────────────────┐
+│  BACKEND API (Express - Port 3001)                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  src/api/server.ts                                          │
+│    ├─> POST /api/start-bot                                 │
+│    │     └─> BotState.start(config)                         │
+│    │           └─> Sets: running = true                     │
+│    │                                                         │
+│    ├─> GET /api/bot-status                                 │
+│    │     └─> BotState.getStatus()                          │
+│    │           └─> Returns: { running, config, stats }    │
+│    │                                                         │
+│    ├─> GET /api/memories                                    │
+│    │     └─> memoryStorage.fetchAllMemories()              │
+│    │           └─> Queries: BNB Greenfield                 │
+│    │                                                         │
+│    └─> GET /api/trade-logs                                  │
+│          └─> BotState.getTradeLogs()                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│  BOT STATE & TRADING LOOP                                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  src/bot-state.ts (Singleton)                              │
+│    ├─> Stores: running, config, tradeLogs                  │
+│    └─> Used by: src/index.ts (trading loop)                │
+│                                                             │
+│  src/index.ts (Main Loop)                                   │
+│    └─> Checks: BotState.isRunning()                         │
+│         └─> If true: Execute trading cycle                  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow Between Directories
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  TRADING CYCLE (Every 5 minutes)                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. src/index.ts (Main Loop)                                │
+│     │                                                       │
+│     ├─> src/data/marketFetcher.ts                          │
+│     │     └─> Fetches: DexScreener API                     │
+│     │           └─> Returns: Token prices, volume          │
+│     │                                                       │
+│     ├─> src/blockchain/memoryStorage.ts                     │
+│     │     └─> Fetches: BNB Greenfield                      │
+│     │           └─> Returns: Past trade memories           │
+│     │                                                       │
+│     ├─> src/ai/immortalAgent.ts                            │
+│     │     ├─> Input: Market data + Memories                │
+│     │     ├─> Uses: src/ai/llmInterface.ts                 │
+│     │     │     └─> Calls: OpenRouter API (GPT-4o-mini)   │
+│     │     └─> Returns: Decision (BUY/SELL/HOLD)            │
+│     │                                                       │
+│     ├─> src/utils/safeguards.ts                            │
+│     │     └─> Validates: Trade amount, balance             │
+│     │                                                       │
+│     ├─> src/blockchain/tradeExecutor.ts                     │
+│     │     ├─> Uses: src/blockchain/pancakeSwapIntegration  │
+│     │     │     └─> Executes: PancakeSwap swap            │
+│     │     └─> Returns: Transaction hash                   │
+│     │                                                       │
+│     └─> src/blockchain/memoryStorage.ts                     │
+│           └─> Stores: Trade outcome → BNB Greenfield      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│  FRONTEND UPDATES (Polling every 30s)                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  frontend/components/dashboard/                            │
+│    └─> hooks/usePolling.ts                                 │
+│          └─> GET /api/bot-status (every 30s)               │
+│                └─> Updates: UI state                        │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Import Relationships Summary
+
+| Module | Imports From | Used By |
+|--------|-------------|---------|
+| `src/config.ts` | `dotenv`, `ethers` | **Everything** (central config) |
+| `src/index.ts` | All core modules | Entry point |
+| `src/ai/immortalAgent.ts` | `memoryStorage`, `llmInterface`, `config` | `index.ts`, `orchestrator.ts` |
+| `src/blockchain/tradeExecutor.ts` | `pancakeSwapIntegration`, `safeguards`, `config` | `index.ts`, `api/server.ts` |
+| `src/blockchain/memoryStorage.ts` | `@bnb-chain/greenfield-js-sdk`, `config` | `immortalAgent`, `api/server.ts` |
+| `src/data/marketFetcher.ts` | `node-fetch`, `config` | `index.ts`, `tokenDiscovery.ts` |
+| `src/api/server.ts` | `bot-state`, `tradeExecutor`, `memoryStorage` | Frontend (HTTP) |
+| `src/bot-state.ts` | `config`, `logger` | `api/server.ts`, `index.ts` |
+| `frontend/lib/api.ts` | `fetch` API | All frontend components |
+| `frontend/components/**` | `lib/api.ts`, `hooks/**` | Next.js pages |
+
+### Key Connection Points
+
+1. **Config Hub**: `src/config.ts` is imported by virtually every module
+2. **State Management**: `src/bot-state.ts` connects API server ↔ Trading loop
+3. **Memory Bridge**: `src/blockchain/memoryStorage.ts` connects AI ↔ Greenfield
+4. **Trading Bridge**: `src/blockchain/tradeExecutor.ts` connects AI ↔ PancakeSwap
+5. **API Bridge**: `src/api/server.ts` connects Frontend ↔ Backend
+6. **Data Bridge**: `src/data/marketFetcher.ts` connects Bot ↔ DexScreener
+
+### External Service Connections
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  EXTERNAL SERVICES                                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  DexScreener API                                            │
+│    ↑                                                         │
+│    └─ src/data/marketFetcher.ts                             │
+│                                                             │
+│  OpenRouter API (GPT-4o-mini)                               │
+│    ↑                                                         │
+│    └─ src/ai/llmInterface.ts                                │
+│                                                             │
+│  BNB Greenfield (Storage)                                    │
+│    ↑                                                         │
+│    └─ src/blockchain/memoryStorage.ts                       │
+│                                                             │
+│  PancakeSwap (DEX)                                          │
+│    ↑                                                         │
+│    └─ src/blockchain/pancakeSwapIntegration.ts             │
+│                                                             │
+│  Telegram Bot API                                            │
+│    ↑                                                         │
+│    └─ src/alerts/telegramBot.ts                            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## External Dependencies
 
 ### Core (Required)
@@ -348,3 +671,4 @@ MIT (keep it open!)
 ---
 
 **"An AI that never forgets"** 🧠💾
+ 

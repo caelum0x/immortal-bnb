@@ -21,7 +21,7 @@ interface SafeWalletConfig {
 
 export class SafeWalletClient {
   private wallet: ethers.Wallet | null = null;
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.JsonRpcProvider;
   private safeAddress: string | null = null;
   private safeContract: ethers.Contract | null = null;
 
@@ -35,8 +35,8 @@ export class SafeWalletClient {
 
   constructor() {
     // Initialize Polygon provider
-    const rpcUrl = CONFIG.POLYMARKET_RPC_URL || 'https://polygon-rpc.com';
-    this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+    const rpcUrl = CONFIG.POLYGON_RPC || CONFIG.POLYGON_TESTNET_RPC || 'https://polygon-rpc.com';
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
   }
 
   /**
@@ -48,21 +48,27 @@ export class SafeWalletClient {
       this.wallet = new ethers.Wallet(config.ownerPrivateKey, this.provider);
 
       // Initialize Safe contract
-      this.safeContract = new ethers.Contract(
+      const safeContract = new ethers.Contract(
         this.safeAddress,
         this.SAFE_ABI,
         this.wallet
-      );
+      ) as ethers.Contract & {
+        getOwners: () => Promise<string[]>;
+        getThreshold: () => Promise<bigint>;
+        nonce: () => Promise<bigint>;
+        execTransaction: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+      };
+      this.safeContract = safeContract;
 
       // Verify wallet is owner of Safe
-      const owners = await this.safeContract.getOwners();
+      const owners = await safeContract.getOwners();
       if (!owners.includes(this.wallet.address)) {
         throw new Error('Wallet is not an owner of this Safe');
       }
 
       // Verify threshold is 1 (single-sig)
-      const threshold = await this.safeContract.getThreshold();
-      if (threshold.toNumber() !== 1) {
+      const threshold = await safeContract.getThreshold();
+      if (Number(threshold) !== 1) {
         logger.warn('⚠️  Safe threshold is not 1. Multi-sig may require additional signatures.');
       }
 
@@ -93,13 +99,15 @@ export class SafeWalletClient {
         usdcAddress,
         ['function balanceOf(address) view returns (uint256)'],
         this.provider
-      );
+      ) as ethers.Contract & {
+        balanceOf: (address: string) => Promise<bigint>;
+      };
 
       const usdcBalance = await usdcContract.balanceOf(this.safeAddress);
 
       return {
-        matic: parseFloat(ethers.utils.formatEther(maticBalance)),
-        usdc: parseFloat(ethers.utils.formatUnits(usdcBalance, 6)), // USDC has 6 decimals
+        matic: parseFloat(ethers.formatEther(maticBalance)),
+        usdc: parseFloat(ethers.formatUnits(usdcBalance, 6)), // USDC has 6 decimals
       };
     } catch (error) {
       logger.error('Failed to get balance:', error);
@@ -177,16 +185,21 @@ export class SafeWalletClient {
    */
   private async executeSafeTransaction(
     to: string,
-    value: ethers.BigNumber,
+    value: bigint,
     data: string
-  ): Promise<ethers.ContractTransaction> {
+  ): Promise<ethers.ContractTransactionResponse> {
     if (!this.wallet || !this.safeContract) {
       throw new Error('Wallet not initialized');
     }
 
     try {
+      const safeContract = this.safeContract as ethers.Contract & {
+        nonce: () => Promise<bigint>;
+        execTransaction: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+      };
+
       // Get Safe nonce
-      const nonce = await this.safeContract.nonce();
+      const nonce = await safeContract.nonce();
 
       // Create transaction hash
       const txHash = await this.createTransactionHash({
@@ -197,16 +210,16 @@ export class SafeWalletClient {
         safeTxGas: 0,
         baseGas: 0,
         gasPrice: 0,
-        gasToken: ethers.constants.AddressZero,
-        refundReceiver: ethers.constants.AddressZero,
-        nonce: nonce.toNumber(),
+        gasToken: ethers.ZeroAddress,
+        refundReceiver: ethers.ZeroAddress,
+        nonce: Number(nonce),
       });
 
       // Sign transaction
-      const signature = await this.wallet.signMessage(ethers.utils.arrayify(txHash));
+      const signature = await this.wallet.signMessage(ethers.getBytes(txHash));
 
       // Execute transaction through Safe
-      const tx = await this.safeContract.execTransaction(
+      const tx = await safeContract.execTransaction(
         to,
         value,
         data,
@@ -214,8 +227,8 @@ export class SafeWalletClient {
         0, // safeTxGas
         0, // baseGas
         0, // gasPrice
-        ethers.constants.AddressZero, // gasToken
-        ethers.constants.AddressZero, // refundReceiver
+        ethers.ZeroAddress, // gasToken
+        ethers.ZeroAddress, // refundReceiver
         signature
       );
 
@@ -233,7 +246,7 @@ export class SafeWalletClient {
    */
   private async createTransactionHash(params: {
     to: string;
-    value: ethers.BigNumber;
+    value: bigint;
     data: string;
     operation: number;
     safeTxGas: number;
@@ -246,7 +259,8 @@ export class SafeWalletClient {
     // This is a simplified version
     // In production, use the official Gnosis Safe SDK for proper hash calculation
 
-    const encoded = ethers.utils.defaultAbiCoder.encode(
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const encoded = abiCoder.encode(
       ['address', 'uint256', 'bytes', 'uint8', 'uint256', 'uint256', 'uint256', 'address', 'address', 'uint256'],
       [
         params.to,
@@ -262,7 +276,7 @@ export class SafeWalletClient {
       ]
     );
 
-    return ethers.utils.keccak256(encoded);
+    return ethers.keccak256(encoded);
   }
 
   /**
@@ -309,7 +323,10 @@ export class SafeWalletClient {
       throw new Error('Wallet not initialized');
     }
 
-    return await this.safeContract.getOwners();
+    const safeContract = this.safeContract as ethers.Contract & {
+      getOwners: () => Promise<string[]>;
+    };
+    return await safeContract.getOwners();
   }
 
   /**
@@ -320,8 +337,11 @@ export class SafeWalletClient {
       throw new Error('Wallet not initialized');
     }
 
-    const threshold = await this.safeContract.getThreshold();
-    return threshold.toNumber();
+    const safeContract = this.safeContract as ethers.Contract & {
+      getThreshold: () => Promise<bigint>;
+    };
+    const threshold = await safeContract.getThreshold();
+    return Number(threshold);
   }
 
   /**

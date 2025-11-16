@@ -9,7 +9,8 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText } from 'ai';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
-import { MarketInfo, MarketOpportunity } from './marketDataFetcher';
+import type { MarketOpportunity } from './marketDataFetcher';
+import type { MarketInfo } from './polymarketClient';
 import { polymarketDataFetcher } from './marketDataFetcher';
 import { polymarketService } from './polymarketClient';
 

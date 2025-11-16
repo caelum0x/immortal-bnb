@@ -116,7 +116,7 @@ export class WormholeService {
     this.targetProvider = new ethers.JsonRpcProvider(
       process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com'
     );
-    this.wallet = new ethers.Wallet(CONFIG.PRIVATE_KEY, this.sourceProvider);
+    this.wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY, this.sourceProvider);
   }
 
   /**
@@ -456,6 +456,7 @@ export class WormholeService {
     minProfitPercent: number = 0.5
   ): AsyncGenerator<{
     token: string;
+    opportunity: Awaited<ReturnType<WormholeService['calculateArbitrageOpportunity']>>;
     opportunity: ArbitrageOpportunity;
   }> {
     logger.info(`👀 Monitoring ${tokens.length} tokens for arbitrage (min ${minProfitPercent}% profit)`);

@@ -177,14 +177,20 @@ export class FlashLoanExecutor {
 
       // Check all combinations
       for (const [tokenIn, tokenOut] of pairs) {
+        if (!tokenIn || !tokenOut) continue;
+        
         for (const loanAmount of testAmounts) {
           for (let i = 0; i < dexes.length; i++) {
             for (let j = 0; j < dexes.length; j++) {
               if (i === j) continue; // Skip same DEX
 
+              const buyDEX = dexes[i];
+              const sellDEX = dexes[j];
+              if (!buyDEX || !sellDEX) continue;
+
               const strategy: ArbitrageStrategy = {
-                buyDEX: dexes[i],
-                sellDEX: dexes[j],
+                buyDEX,
+                sellDEX,
                 tokenIn,
                 tokenOut,
                 expectedProfit: 0n,

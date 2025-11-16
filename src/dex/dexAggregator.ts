@@ -87,6 +87,10 @@ export class DEXAggregator {
       const bestQuote = validQuotes[0];
       const worstQuote = validQuotes[validQuotes.length - 1];
 
+      if (!bestQuote || !worstQuote) {
+        throw new Error('No valid quotes found');
+      }
+
       const savingsVsWorst = bestQuote.outputAmount - worstQuote.outputAmount;
       const savingsPercentage = Number(savingsVsWorst * BigInt(10000) / worstQuote.outputAmount) / 100;
 
@@ -117,7 +121,9 @@ export class DEXAggregator {
   ): Promise<DEXQuote> {
     try {
       const routerAddress = this.routers[dexName as keyof typeof this.routers];
-      const router = new ethers.Contract(routerAddress, this.ROUTER_ABI, this.provider);
+      const router = new ethers.Contract(routerAddress, this.ROUTER_ABI, this.provider) as ethers.Contract & {
+        getAmountsOut: (amountIn: bigint, path: string[]) => Promise<bigint[]>;
+      };
 
       // Get path (direct swap for now, can add multi-hop later)
       const path = [tokenIn, tokenOut];
@@ -125,6 +131,10 @@ export class DEXAggregator {
       // Get amounts out
       const amounts = await router.getAmountsOut(amountIn, path);
       const outputAmount = amounts[amounts.length - 1];
+
+      if (!outputAmount) {
+        throw new Error('Failed to get output amount from router');
+      }
 
       // Estimate gas
       const gasEstimate = await this.estimateSwapGas(dexName, amountIn, path);
@@ -182,7 +192,9 @@ export class DEXAggregator {
       }
 
       const routerAddress = this.routers[result.bestQuote.dexName as keyof typeof this.routers];
-      const router = new ethers.Contract(routerAddress, this.ROUTER_ABI, signer);
+      const router = new ethers.Contract(routerAddress, this.ROUTER_ABI, signer) as ethers.Contract & {
+        swapExactTokensForTokens: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+      };
 
       // Execute swap
       const tx = await router.swapExactTokensForTokens(

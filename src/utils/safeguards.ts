@@ -277,7 +277,7 @@ export class SafeguardEngine {
       }
 
       // 7. Market condition checks
-      const marketCheck = this.checkMarketConditions();
+      const marketCheck = await this.checkMarketConditions();
       if (!marketCheck.valid) {
         return marketCheck;
       }
@@ -371,14 +371,57 @@ export class SafeguardEngine {
   /**
    * Check overall market conditions
    */
-  private checkMarketConditions(): { valid: boolean; reason?: string; riskLevel: 'low' | 'medium' | 'high' } {
-    // TODO: Implement market condition checks
-    // - Check for high gas prices
-    // - Check for network congestion
-    // - Check for extreme market volatility
-    // - Check for maintenance periods
+  private async checkMarketConditions(): Promise<{ valid: boolean; reason?: string; riskLevel: 'low' | 'medium' | 'high' }> {
+    try {
+      // Check for high gas prices (if provider available)
+      if (this.provider) {
+        try {
+          const feeData = await this.provider.getFeeData();
+          const gasPriceGwei = Number(feeData.gasPrice) / 1e9;
+          
+          // High gas price threshold (adjust based on network)
+          const highGasThreshold = CONFIG.IS_OPBNB ? 0.1 : 50; // opBNB is much cheaper
+          
+          if (gasPriceGwei > highGasThreshold) {
+            return {
+              valid: false,
+              reason: `Gas price too high: ${gasPriceGwei.toFixed(2)} Gwei (threshold: ${highGasThreshold} Gwei)`,
+              riskLevel: 'high'
+            };
+          }
+        } catch (error) {
+          logger.warn('Could not fetch gas price for market condition check');
+        }
+      }
 
-    return { valid: true, riskLevel: 'low' };
+      // Check for extreme volatility (would need historical data)
+      // For now, we'll rely on the token data validation
+
+      // Network congestion check (via pending transactions)
+      if (this.provider) {
+        try {
+          const blockNumber = await this.provider.getBlockNumber();
+          const block = await this.provider.getBlock(blockNumber);
+          
+          // High transaction count in block indicates congestion
+          if (block && block.transactions.length > 200) {
+            return {
+              valid: true,
+              reason: 'Network congestion detected',
+              riskLevel: 'medium'
+            };
+          }
+        } catch (error) {
+          logger.warn('Could not check network congestion');
+        }
+      }
+
+      return { valid: true, riskLevel: 'low' };
+    } catch (error) {
+      logger.error('Error checking market conditions:', error);
+      // Default to allowing trades if check fails
+      return { valid: true, riskLevel: 'medium' };
+    }
   }
 
   /**
