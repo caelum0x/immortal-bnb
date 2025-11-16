@@ -10,9 +10,12 @@
 
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
-import { polymarketService, MarketInfo } from './polymarketClient';
-import { polymarketDataFetcher, MarketOpportunity } from './marketDataFetcher';
-import { aiPredictionAnalyzer, AIMarketAnalysis, TradeDecision } from './aiPredictionAnalyzer';
+import { polymarketService } from './polymarketClient';
+import type { MarketInfo } from './polymarketClient';
+import { polymarketDataFetcher } from './marketDataFetcher';
+import type { MarketOpportunity } from './marketDataFetcher';
+import { aiPredictionAnalyzer } from './aiPredictionAnalyzer';
+import type { AIMarketAnalysis, TradeDecision } from './aiPredictionAnalyzer';
 import { getMultiChainWallet } from '../blockchain/multiChainWalletManager';
 import { getTrendingTokens } from '../data/marketFetcher';
 

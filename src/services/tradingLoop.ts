@@ -514,3 +514,23 @@ export class TradingLoop {
     }
   }
 }
+
+// Singleton instance for application-wide use
+let tradingLoopInstance: TradingLoop | null = null;
+
+/**
+ * Get the singleton trading loop instance
+ */
+export function getTradingLoop(): TradingLoop {
+  if (!tradingLoopInstance) {
+    tradingLoopInstance = new TradingLoop();
+  }
+  return tradingLoopInstance;
+}
+
+/**
+ * Reset the singleton (useful for testing)
+ */
+export function resetTradingLoop(): void {
+  tradingLoopInstance = null;
+}

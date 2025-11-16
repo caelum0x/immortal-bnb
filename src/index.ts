@@ -26,6 +26,7 @@ import { CrossChainArbitrageEngine } from './ai/crossChainStrategy';
 import { StrategyEvolutionEngine } from './ai/strategyEvolution';
 import handleError from './utils/errorHandler';
 import { validateTradeAmount } from './utils/safeguards';
+import { BotState } from './bot-state';
 import { ethers } from 'ethers';
 
 // Global provider and wallet
@@ -211,6 +212,19 @@ async function invokeAgent(tokenAddress: string) {
             activePositions.delete(tokenAddress);
           }
 
+          // Log trade to BotState
+          BotState.addTradeLog({
+            id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            token: tokenAddress,
+            tokenSymbol: tokenData.symbol,
+            action: tradeParams.action,
+            amount: tradeParams.amountBNB,
+            price: parseFloat(tokenData.priceUsd),
+            status: 'success',
+            txHash: tradeResult.txHash
+          });
+
           // Alert successful trade
           await alertTradeExecution(tradeResult, tokenData.symbol, tradeParams.action);
           
@@ -239,6 +253,19 @@ async function invokeAgent(tokenAddress: string) {
           logger.info(`🧠 Trade memory stored in immortal storage`);
           
         } else {
+          // Log failed trade to BotState
+          BotState.addTradeLog({
+            id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            token: tokenAddress,
+            tokenSymbol: tokenData.symbol,
+            action: tradeParams.action,
+            amount: tradeParams.amountBNB,
+            price: parseFloat(tokenData.priceUsd),
+            status: 'failed',
+            error: tradeResult.error
+          });
+          
           logger.error(`❌ Trade execution failed: ${tradeResult.error}`);
         }
         
@@ -271,12 +298,20 @@ async function invokeAgent(tokenAddress: string) {
  * Main loop - check markets periodically
  */
 async function main() {
-  logger.info('🚀 Starting Immortal AI Trading Bot...');
+  // Check if bot is running (frontend-controlled)
+  if (!BotState.isRunning()) {
+    logger.debug('⏸️  Bot is not running (waiting for frontend to start)');
+    return;
+  }
+
+  logger.info('🚀 Starting Immortal AI Trading Bot cycle...');
   logger.info('📍 Network: BNB Chain ' + (CONFIG.NETWORK === 'mainnet' ? 'MAINNET' : 'TESTNET'));
 
-  // Initialize
-  await initializeProvider();
-  initializeTelegramBot();
+  // Initialize if not already done
+  if (!provider) {
+    await initializeProvider();
+    initializeTelegramBot();
+  }
 
   const balance = await getWalletBalance();
   logger.info(`💰 Wallet Balance: ${balance.toFixed(4)} BNB`);
@@ -285,10 +320,9 @@ async function main() {
     logger.warn('⚠️  Low balance! Get testnet BNB from https://testnet.bnbchain.org/faucet-smart');
   }
 
-  await alertBotStatus('started', `Bot started with ${balance.toFixed(4)} BNB balance`);
-
-  // Get trending tokens or use watchlist
-  let tokensToWatch = CONFIG.DEFAULT_WATCHLIST;
+  // Get tokens from BotState config or fallback to defaults
+  const botConfig = BotState.getConfig();
+  let tokensToWatch = botConfig?.tokens || CONFIG.DEFAULT_WATCHLIST;
 
   if (tokensToWatch.length === 0) {
     logger.info('📈 Fetching trending tokens...');
@@ -299,6 +333,12 @@ async function main() {
 
   // Analyze each token
   for (const tokenAddress of tokensToWatch) {
+    // Check again if bot is still running (user might have stopped it)
+    if (!BotState.isRunning()) {
+      logger.info('⏸️  Bot stopped during cycle');
+      break;
+    }
+
     try {
       await invokeAgent(tokenAddress);
 
@@ -320,13 +360,28 @@ async function startBot() {
   // Start API server for frontend communication
   startAPIServer();
 
-  // Run immediately
-  await main();
+  // Initialize provider once
+  await initializeProvider();
+  initializeTelegramBot();
 
-  // Then run on interval
-  setInterval(async () => {
-    await main();
+  const balance = await getWalletBalance();
+  logger.info(`💰 Wallet Balance: ${balance.toFixed(4)} BNB`);
+  await alertBotStatus('started', `Bot initialized with ${balance.toFixed(4)} BNB balance`);
+
+  // Run trading loop on interval (checks BotState.isRunning() inside)
+  const intervalId = setInterval(async () => {
+    try {
+      await main();
+    } catch (error) {
+      logger.error(`Error in trading loop: ${(error as Error).message}`);
+    }
   }, CONFIG.BOT_LOOP_INTERVAL_MS);
+
+  // Store interval ID in BotState for cleanup
+  BotState.setIntervalId(intervalId);
+
+  logger.info('✅ Bot loop started - waiting for frontend to start trading');
+  logger.info('   Use the frontend dashboard to start/stop the bot');
 }
 
 // Handle graceful shutdown

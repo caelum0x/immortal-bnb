@@ -199,7 +199,7 @@ export class MEVProtectionService {
 
       // Find transaction index
       const txIndex = block.transactions.findIndex(
-        (t) => typeof t === 'object' && t.hash === txHash
+        (t) => typeof t === 'object' && t !== null && 'hash' in t && (t as { hash: string }).hash === txHash
       );
 
       if (txIndex === -1) {
@@ -216,11 +216,17 @@ export class MEVProtectionService {
         nextTx &&
         typeof prevTx === 'object' &&
         typeof nextTx === 'object' &&
-        prevTx.from === nextTx.from &&
-        prevTx.from !== tx.from
+        prevTx !== null &&
+        nextTx !== null &&
+        'from' in prevTx &&
+        'from' in nextTx &&
+        'from' in tx &&
+        (prevTx as { from: string }).from === (nextTx as { from: string }).from &&
+        (prevTx as { from: string }).from !== (tx as { from: string }).from
       ) {
-        logger.warn(`🚨 Potential sandwich attack detected by ${prevTx.from}`);
-        return { isSandwich: true, attacker: prevTx.from };
+        const attacker = (prevTx as { from: string }).from;
+        logger.warn(`🚨 Potential sandwich attack detected by ${attacker}`);
+        return { isSandwich: true, attacker };
       }
 
       return { isSandwich: false };

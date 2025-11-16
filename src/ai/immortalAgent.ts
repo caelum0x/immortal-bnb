@@ -498,23 +498,540 @@ Market Conditions: ${marketData.marketTrend || 'Unknown'}
     const avgReturn = recentTrades.reduce((sum, trade) => 
       sum + (trade.profitLoss || 0), 0) / recentTrades.length;
     
+    // Calculate volatility of returns
+    const returnVariance = recentTrades.reduce((sum, trade) => {
+      const deviation = (trade.profitLoss || 0) - avgReturn;
+      return sum + (deviation * deviation);
+    }, 0) / recentTrades.length;
+    const volatility = Math.sqrt(returnVariance);
+    
+    // Advanced risk tolerance adjustment based on Sharpe-like ratio
+    const riskAdjustedReturn = avgReturn / (volatility || 1);
+    
     // Adjust risk tolerance based on performance
-    if (successRate > 70 && avgReturn > 5) {
+    if (successRate > 70 && avgReturn > 5 && riskAdjustedReturn > 1) {
+      // Great performance with good risk management
       this.personality.riskTolerance = Math.min(0.8, this.personality.riskTolerance + 0.1);
-    } else if (successRate < 40 || avgReturn < -5) {
-      this.personality.riskTolerance = Math.max(0.2, this.personality.riskTolerance - 0.1);
-    }
-    
-    // Adjust aggressiveness
-    if (successRate > 60) {
       this.personality.aggressiveness = Math.min(0.7, this.personality.aggressiveness + 0.05);
-    } else {
+      logger.info('📈 Increasing risk tolerance due to strong performance');
+    } else if (successRate < 40 || avgReturn < -5 || riskAdjustedReturn < -0.5) {
+      // Poor performance or high risk
+      this.personality.riskTolerance = Math.max(0.2, this.personality.riskTolerance - 0.1);
       this.personality.aggressiveness = Math.max(0.1, this.personality.aggressiveness - 0.05);
+      logger.info('📉 Decreasing risk tolerance due to poor performance');
     }
     
-    logger.info('🧬 AI personality evolved:');
-    logger.info(`  Risk Tolerance: ${this.personality.riskTolerance.toFixed(2)}`);
+    // Adjust learning rate based on consistency
+    if (volatility < 5) {
+      // Low volatility = consistent performance = can learn faster
+      this.personality.learningRate = Math.min(0.3, this.personality.learningRate + 0.05);
+    } else if (volatility > 15) {
+      // High volatility = inconsistent = learn slower
+      this.personality.learningRate = Math.max(0.05, this.personality.learningRate - 0.05);
+    }
+    
+    // Adjust exploration vs exploitation
+    if (this.strategies.size < 5 || successRate < 50) {
+      // Need more strategies or current ones aren't working
+      this.personality.explorationRate = Math.min(0.4, this.personality.explorationRate + 0.05);
+    } else if (successRate > 65) {
+      // Good strategies exist, exploit them more
+      this.personality.explorationRate = Math.max(0.1, this.personality.explorationRate - 0.05);
+    }
+    
+    // Adjust confidence threshold dynamically
+    if (successRate > 70) {
+      // Can be more lenient with confidence
+      this.personality.confidenceThreshold = Math.max(0.5, this.personality.confidenceThreshold - 0.05);
+    } else if (successRate < 50) {
+      // Need higher confidence to trade
+      this.personality.confidenceThreshold = Math.min(0.8, this.personality.confidenceThreshold + 0.05);
+    }
+    
+    logger.info('🧬 Enhanced AI personality evolution:');
+    logger.info(`  Risk Tolerance: ${this.personality.riskTolerance.toFixed(2)} (${riskAdjustedReturn > 1 ? '↑' : '↓'})`);
     logger.info(`  Aggressiveness: ${this.personality.aggressiveness.toFixed(2)}`);
+    logger.info(`  Learning Rate: ${this.personality.learningRate.toFixed(2)}`);
+    logger.info(`  Exploration Rate: ${this.personality.explorationRate.toFixed(2)}`);
+    logger.info(`  Confidence Threshold: ${this.personality.confidenceThreshold.toFixed(2)}`);
+    logger.info(`  Risk-Adjusted Return: ${riskAdjustedReturn.toFixed(2)}`);
+  }
+
+  /**
+   * Advanced RAG-based decision making with retrieval augmented generation
+   * Retrieves similar past experiences and augments AI decision with this context
+   */
+  async makeDecisionWithRAG(
+    tokenAddress: string,
+    marketData: any,
+    availableAmount: number,
+    externalContext?: {
+      news?: string[];
+      socialSentiment?: number;
+      onChainMetrics?: any;
+    }
+  ): Promise<{
+    action: 'BUY' | 'SELL' | 'HOLD';
+    amount: number;
+    confidence: number;
+    reasoning: string;
+    strategy: string;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    retrievedContext: ExtendedTradeMemory[];
+  }> {
+    try {
+      logger.info('🔍 Starting RAG-based decision making...');
+      
+      // RETRIEVAL: Find similar past situations
+      const similarMemories = this.findSimilarSituations(tokenAddress, marketData);
+      logger.info(`📚 Retrieved ${similarMemories.length} similar memories`);
+      
+      // Analyze patterns in retrieved memories
+      const memoryInsights = this.analyzeRetrievedMemories(similarMemories);
+      
+      // Get current token analysis
+      const tokenAnalysis = await this.analyzeToken(tokenAddress, marketData);
+      
+      // AUGMENTATION: Build enhanced context with retrieved memories
+      const augmentedContext = this.buildRAGContext(
+        tokenAnalysis,
+        similarMemories,
+        memoryInsights,
+        marketData,
+        externalContext
+      );
+      
+      // GENERATION: Get AI decision using augmented context
+      const aiDecision = await getAIDecision(augmentedContext, this.personality);
+      
+      // Calculate confidence based on memory patterns
+      const enhancedConfidence = this.calculateRAGConfidence(
+        aiDecision,
+        similarMemories,
+        memoryInsights
+      );
+      
+      // Apply personality and risk management
+      const finalDecision = this.applyPersonalityFilter(
+        { ...aiDecision, confidence: enhancedConfidence },
+        availableAmount
+      );
+      
+      logger.info(`🧠 RAG Decision: ${finalDecision.action} ${finalDecision.amount} (${finalDecision.confidence.toFixed(2)})`);
+      logger.info(`📝 Strategy: ${finalDecision.strategy} | Risk: ${finalDecision.riskLevel}`);
+      logger.info(`🎯 Memory-Enhanced Confidence: ${enhancedConfidence.toFixed(2)}`);
+      
+      return {
+        ...finalDecision,
+        retrievedContext: similarMemories
+      };
+      
+    } catch (error) {
+      logger.error('RAG decision failed:', error);
+      return {
+        action: 'HOLD',
+        amount: 0,
+        confidence: 0,
+        reasoning: 'Error in RAG decision process',
+        strategy: 'error',
+        riskLevel: 'MEDIUM',
+        retrievedContext: []
+      };
+    }
+  }
+
+  /**
+   * Analyze patterns in retrieved memories for insights
+   */
+  private analyzeRetrievedMemories(memories: ExtendedTradeMemory[]): {
+    successRate: number;
+    avgReturn: number;
+    dominantStrategy: string;
+    riskDistribution: Record<string, number>;
+    marketTrendSuccess: Record<string, number>;
+    confidenceCorrelation: number;
+  } {
+    if (memories.length === 0) {
+      return {
+        successRate: 0,
+        avgReturn: 0,
+        dominantStrategy: 'unknown',
+        riskDistribution: {},
+        marketTrendSuccess: {},
+        confidenceCorrelation: 0
+      };
+    }
+    
+    const profitable = memories.filter(m => m.outcome === 'profit');
+    const successRate = profitable.length / memories.length;
+    const avgReturn = memories.reduce((sum, m) => sum + (m.profitLoss || 0), 0) / memories.length;
+    
+    // Find dominant strategy
+    const strategyCounts = new Map<string, number>();
+    memories.forEach(m => {
+      strategyCounts.set(m.strategy, (strategyCounts.get(m.strategy) || 0) + 1);
+    });
+    const dominantStrategy = Array.from(strategyCounts.entries())
+      .sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown';
+    
+    // Risk distribution
+    const riskDistribution: Record<string, number> = {};
+    memories.forEach(m => {
+      riskDistribution[m.riskLevel] = (riskDistribution[m.riskLevel] || 0) + 1;
+    });
+    
+    // Market trend success rates
+    const marketTrendSuccess: Record<string, number> = {};
+    const trendCounts: Record<string, number> = {};
+    memories.forEach(m => {
+      const trend = m.marketConditions.marketTrend;
+      marketTrendSuccess[trend] = (marketTrendSuccess[trend] || 0) + (m.outcome === 'profit' ? 1 : 0);
+      trendCounts[trend] = (trendCounts[trend] || 0) + 1;
+    });
+    Object.keys(marketTrendSuccess).forEach(trend => {
+      const count = trendCounts[trend];
+      if (count && count > 0) {
+        marketTrendSuccess[trend] = (marketTrendSuccess[trend] || 0) / count;
+      }
+    });
+    
+    // Confidence correlation with success
+    const confidentTrades = memories.filter(m => m.confidence > 0.7);
+    const confidenceCorrelation = confidentTrades.length > 0
+      ? confidentTrades.filter(m => m.outcome === 'profit').length / confidentTrades.length
+      : 0.5;
+    
+    return {
+      successRate,
+      avgReturn,
+      dominantStrategy,
+      riskDistribution,
+      marketTrendSuccess,
+      confidenceCorrelation
+    };
+  }
+
+  /**
+   * Build RAG-enhanced context for AI decision making
+   */
+  private buildRAGContext(
+    tokenAnalysis: any,
+    similarMemories: ExtendedTradeMemory[],
+    memoryInsights: any,
+    marketData: any,
+    externalContext?: any
+  ): string {
+    const context = `
+# Advanced Market Analysis with Historical Context
+
+## Current Token Analysis
+- Symbol: ${tokenAnalysis.symbol || 'Unknown'}
+- Address: ${marketData.address || 'Unknown'}
+- Current Price: $${marketData.price || 0}
+- 24h Change: ${marketData.priceChange24h || 0}%
+- Volume 24h: $${marketData.volume24h || 0}
+- Liquidity: $${marketData.liquidity || 0}
+- Technical Score: ${tokenAnalysis.technicalScore?.toFixed(2) || 0.5}
+- Sentiment Score: ${tokenAnalysis.sentimentScore?.toFixed(2) || 0.5}
+- AI Confidence: ${tokenAnalysis.aiConfidence?.toFixed(2) || 0.5}
+
+## Retrieved Historical Context (RAG)
+Retrieved ${similarMemories.length} similar past trading situations:
+
+### Memory Insights
+- Historical Success Rate: ${(memoryInsights.successRate * 100).toFixed(1)}%
+- Average Return: ${memoryInsights.avgReturn.toFixed(2)}%
+- Dominant Strategy: ${memoryInsights.dominantStrategy}
+- Confidence Correlation: ${(memoryInsights.confidenceCorrelation * 100).toFixed(1)}%
+
+### Similar Past Trades
+${similarMemories.slice(0, 3).map((m, i) => `
+${i + 1}. ${m.tokenSymbol} (${new Date(m.timestamp).toLocaleDateString()})
+   - Action: ${m.action} | Outcome: ${m.outcome}
+   - P&L: ${m.profitLoss?.toFixed(2) || 0}%
+   - Strategy: ${m.strategy}
+   - Market: ${m.marketConditions.marketTrend}
+   - Lessons: ${m.lessons.join('; ') || 'None'}
+`).join('')}
+
+### Market Trend Performance
+${Object.entries(memoryInsights.marketTrendSuccess).map(([trend, rate]) => 
+  `- ${trend}: ${((rate as number) * 100).toFixed(1)}% success rate`
+).join('\n')}
+
+## Current Market Conditions
+- Trend: ${marketData.marketTrend || 'Unknown'}
+- Buy/Sell Pressure: ${marketData.buySellPressure || 0}
+- Volatility: ${this.calculateVolatility(similarMemories)}
+
+## AI Personality
+- Risk Tolerance: ${this.personality.riskTolerance.toFixed(2)}
+- Aggressiveness: ${this.personality.aggressiveness.toFixed(2)}
+- Confidence Threshold: ${this.personality.confidenceThreshold.toFixed(2)}
+- Exploration Rate: ${this.personality.explorationRate.toFixed(2)}
+
+## Performance Stats
+- Total Trades: ${this.totalTrades}
+- Current Success Rate: ${this.getSuccessRate().toFixed(1)}%
+- Active Strategies: ${this.strategies.size}
+
+${externalContext?.news ? `
+## External News Context
+${externalContext.news.slice(0, 3).map((n: string, i: number) => `${i + 1}. ${n}`).join('\n')}
+` : ''}
+
+${externalContext?.socialSentiment ? `
+## Social Sentiment
+- Score: ${externalContext.socialSentiment.toFixed(2)}/1.0
+` : ''}
+
+Based on this comprehensive analysis, provide a trading decision (BUY/SELL/HOLD) with:
+1. Action and recommended amount
+2. Confidence level (0-1)
+3. Detailed reasoning
+4. Strategy name
+5. Risk level (LOW/MEDIUM/HIGH)
+`;
+    
+    return context;
+  }
+
+  /**
+   * Calculate confidence using RAG insights
+   */
+  private calculateRAGConfidence(
+    aiDecision: any,
+    similarMemories: ExtendedTradeMemory[],
+    memoryInsights: any
+  ): number {
+    let confidence = aiDecision.confidence || 0.5;
+    
+    // Boost confidence if similar situations were successful
+    if (memoryInsights.successRate > 0.7 && similarMemories.length >= 3) {
+      confidence *= 1.2;
+      logger.info('✅ Confidence boosted by strong historical performance');
+    }
+    
+    // Reduce confidence if similar situations failed
+    if (memoryInsights.successRate < 0.3 && similarMemories.length >= 3) {
+      confidence *= 0.7;
+      logger.warn('⚠️  Confidence reduced by poor historical performance');
+    }
+    
+    // Adjust based on average returns
+    if (memoryInsights.avgReturn > 10) {
+      confidence *= 1.1;
+    } else if (memoryInsights.avgReturn < -10) {
+      confidence *= 0.8;
+    }
+    
+    // Factor in confidence correlation
+    confidence *= (0.7 + (memoryInsights.confidenceCorrelation * 0.3));
+    
+    return Math.max(0, Math.min(1, confidence));
+  }
+
+  /**
+   * Calculate volatility from historical memories
+   */
+  private calculateVolatility(memories: ExtendedTradeMemory[]): string {
+    if (memories.length === 0) return 'Unknown';
+    
+    const returns = memories.map(m => m.profitLoss || 0);
+    const avg = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+    const variance = returns.reduce((sum, r) => sum + Math.pow(r - avg, 2), 0) / returns.length;
+    const volatility = Math.sqrt(variance);
+    
+    if (volatility < 5) return 'Low';
+    if (volatility < 15) return 'Medium';
+    return 'High';
+  }
+
+  /**
+   * Implement continuous learning loop
+   * Periodically analyzes performance and adjusts strategies
+   */
+  async runLearningLoop(): Promise<{
+    personalityUpdated: boolean;
+    strategiesOptimized: number;
+    insights: string[];
+  }> {
+    logger.info('🔄 Starting learning loop...');
+    
+    try {
+      // Load latest memories
+      await this.loadMemories();
+      
+      const initialPersonality = { ...this.personality };
+      const initialStrategies = this.strategies.size;
+      
+      // Analyze recent performance
+      const recentMemories = Array.from(this.memories.values())
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 50);
+      
+      // Update personality based on performance
+      await this.evolvePersonality();
+      
+      const personalityUpdated = JSON.stringify(initialPersonality) !== JSON.stringify(this.personality);
+      
+      // Optimize strategies
+      const optimizedStrategies = await this.optimizeStrategies(recentMemories);
+      
+      // Generate insights
+      const insights = await this.generateLearningInsights(recentMemories);
+      
+      logger.info('✅ Learning loop complete');
+      logger.info(`  Personality Updated: ${personalityUpdated}`);
+      logger.info(`  Strategies Optimized: ${optimizedStrategies}`);
+      logger.info(`  Insights Generated: ${insights.length}`);
+      
+      return {
+        personalityUpdated,
+        strategiesOptimized: optimizedStrategies,
+        insights
+      };
+      
+    } catch (error) {
+      logger.error('Learning loop failed:', error);
+      return {
+        personalityUpdated: false,
+        strategiesOptimized: 0,
+        insights: ['Learning loop encountered an error']
+      };
+    }
+  }
+
+  /**
+   * Optimize trading strategies based on performance
+   */
+  private async optimizeStrategies(recentMemories: ExtendedTradeMemory[]): Promise<number> {
+    let optimizedCount = 0;
+    
+    // Analyze each strategy's recent performance
+    const strategyPerformance = new Map<string, {
+      trades: ExtendedTradeMemory[];
+      winRate: number;
+      avgReturn: number;
+    }>();
+    
+    recentMemories.forEach(memory => {
+      if (!strategyPerformance.has(memory.strategy)) {
+        strategyPerformance.set(memory.strategy, {
+          trades: [],
+          winRate: 0,
+          avgReturn: 0
+        });
+      }
+      strategyPerformance.get(memory.strategy)!.trades.push(memory);
+    });
+    
+    // Calculate performance metrics for each strategy
+    for (const [strategyId, data] of strategyPerformance) {
+      const profitable = data.trades.filter(t => t.outcome === 'profit');
+      data.winRate = profitable.length / data.trades.length;
+      data.avgReturn = data.trades.reduce((sum, t) => sum + (t.profitLoss || 0), 0) / data.trades.length;
+      
+      if (this.strategies.has(strategyId)) {
+        const strategy = this.strategies.get(strategyId)!;
+        
+        // Update performance metrics
+        strategy.performance.shortTerm = data.avgReturn;
+        
+        // Prune underperforming strategies
+        if (data.winRate < 0.3 && data.trades.length >= 10) {
+          logger.warn(`🗑️  Pruning underperforming strategy: ${strategyId}`);
+          this.strategies.delete(strategyId);
+          optimizedCount++;
+        } else {
+          // Update strategy parameters based on successful patterns
+          this.strategies.set(strategyId, strategy);
+          optimizedCount++;
+        }
+      }
+    }
+    
+    return optimizedCount;
+  }
+
+  /**
+   * Generate actionable insights from learning
+   */
+  private async generateLearningInsights(recentMemories: ExtendedTradeMemory[]): Promise<string[]> {
+    const insights: string[] = [];
+    
+    if (recentMemories.length === 0) {
+      return ['Insufficient data for insights. Continue trading to build experience.'];
+    }
+    
+    // Win rate analysis
+    const profitable = recentMemories.filter(m => m.outcome === 'profit');
+    const winRate = profitable.length / recentMemories.length;
+    
+    if (winRate > 0.7) {
+      insights.push(`✨ Excellent recent performance! Win rate: ${(winRate * 100).toFixed(1)}%`);
+    } else if (winRate < 0.4) {
+      insights.push(`⚠️  Recent win rate ${(winRate * 100).toFixed(1)}% is below target. Consider strategy review.`);
+    }
+    
+    // Return analysis
+    const avgReturn = recentMemories.reduce((sum, m) => sum + (m.profitLoss || 0), 0) / recentMemories.length;
+    if (avgReturn > 5) {
+      insights.push(`📈 Strong average returns: ${avgReturn.toFixed(2)}%. Current approach is effective.`);
+    } else if (avgReturn < 0) {
+      insights.push(`📉 Negative average returns: ${avgReturn.toFixed(2)}%. Risk management needs adjustment.`);
+    }
+    
+    // Strategy insights
+    const strategyStats = new Map<string, { count: number; winRate: number }>();
+    recentMemories.forEach(m => {
+      if (!strategyStats.has(m.strategy)) {
+        strategyStats.set(m.strategy, { count: 0, winRate: 0 });
+      }
+      const stats = strategyStats.get(m.strategy)!;
+      stats.count++;
+      if (m.outcome === 'profit') stats.winRate++;
+    });
+    
+    strategyStats.forEach((stats, strategy) => {
+      stats.winRate = stats.winRate / stats.count;
+      if (stats.winRate > 0.75 && stats.count >= 5) {
+        insights.push(`🎯 Strategy "${strategy}" performing exceptionally well (${(stats.winRate * 100).toFixed(1)}% win rate)`);
+      } else if (stats.winRate < 0.3 && stats.count >= 5) {
+        insights.push(`⛔ Strategy "${strategy}" underperforming (${(stats.winRate * 100).toFixed(1)}% win rate). Consider alternatives.`);
+      }
+    });
+    
+    // Market condition insights
+    const trendPerformance = new Map<string, { count: number; avgReturn: number }>();
+    recentMemories.forEach(m => {
+      const trend = m.marketConditions.marketTrend;
+      if (!trendPerformance.has(trend)) {
+        trendPerformance.set(trend, { count: 0, avgReturn: 0 });
+      }
+      const perf = trendPerformance.get(trend)!;
+      perf.count++;
+      perf.avgReturn += m.profitLoss || 0;
+    });
+    
+    trendPerformance.forEach((perf, trend) => {
+      perf.avgReturn = perf.avgReturn / perf.count;
+      if (perf.avgReturn > 5 && perf.count >= 3) {
+        insights.push(`🌊 Strong performance in ${trend} markets (${perf.avgReturn.toFixed(2)}% avg)`);
+      } else if (perf.avgReturn < -5 && perf.count >= 3) {
+        insights.push(`🌊 Weak performance in ${trend} markets (${perf.avgReturn.toFixed(2)}% avg). Avoid or adjust strategy.`);
+      }
+    });
+    
+    // Personality recommendations
+    if (this.personality.riskTolerance > 0.7 && avgReturn < 0) {
+      insights.push('⚖️  High risk tolerance with negative returns. Consider reducing risk exposure.');
+    }
+    if (this.personality.explorationRate < 0.15 && winRate < 0.5) {
+      insights.push('🔍 Low exploration rate with poor performance. Try new strategies.');
+    }
+    
+    return insights;
   }
 
   /**

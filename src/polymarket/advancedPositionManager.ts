@@ -4,8 +4,7 @@
  * Provides position management: split, merge, redeem, convert
  */
 
-import { ethers, BigNumber } from 'ethers';
-import { Interface } from 'ethers/lib/utils';
+import { ethers, Interface, type TransactionReceipt } from 'ethers';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
 
@@ -73,14 +72,14 @@ export interface TransferParams {
 }
 
 export class AdvancedPositionManager {
-    private provider: ethers.providers.JsonRpcProvider;
+    private provider: ethers.JsonRpcProvider;
     private wallet: ethers.Wallet;
     private proxyFactory: ethers.Contract | null = null;
     private useProxyWallet: boolean;
 
     constructor(privateKey?: string, rpcUrl?: string) {
         const polygonRPC = rpcUrl || process.env.POLYGON_RPC || 'https://polygon-rpc.com';
-        this.provider = new ethers.providers.JsonRpcProvider(polygonRPC);
+        this.provider = new ethers.JsonRpcProvider(polygonRPC);
 
         const pk = privateKey || process.env.WALLET_PRIVATE_KEY || '';
         if (!pk) {
@@ -106,21 +105,21 @@ export class AdvancedPositionManager {
     /**
      * Encode functions (from polymarket-examples)
      */
-    private encodeErc20Transfer(to: string, value: BigNumber): string {
+    private encodeErc20Transfer(to: string, value: bigint): string {
         return ERC20_INTERFACE.encodeFunctionData(
             "transfer(address,uint256)",
             [to, value]
         );
     }
 
-    private encodeErc1155TransferFrom(from: string, to: string, id: string, value: BigNumber): string {
+    private encodeErc1155TransferFrom(from: string, to: string, id: string, value: bigint): string {
         return ERC1155_INTERFACE.encodeFunctionData(
             "safeTransferFrom(address,address,uint256,uint256,bytes)",
-            [from, to, id, value, ethers.constants.HashZero]
+            [from, to, id, value, ethers.ZeroHash]
         );
     }
 
-    private encodeErc20Approve(spender: string, approvalAmount: BigNumber): string {
+    private encodeErc20Approve(spender: string, approvalAmount: bigint): string {
         return ERC20_INTERFACE.encodeFunctionData(
             "approve(address,uint256)",
             [spender, approvalAmount]
@@ -134,24 +133,24 @@ export class AdvancedPositionManager {
         );
     }
 
-    private encodeSplit(collateralToken: string, conditionId: string, amount: BigNumber): string {
+    private encodeSplit(collateralToken: string, conditionId: string, amount: bigint): string {
         return CTF_INTERFACE.encodeFunctionData(
             "splitPosition(address,bytes32,bytes32,uint256[],uint256)",
-            [collateralToken, ethers.constants.HashZero, conditionId, [1, 2], amount]
+            [collateralToken, ethers.ZeroHash, conditionId, [1, 2], amount]
         );
     }
 
-    private encodeMerge(collateralToken: string, conditionId: string, amount: BigNumber): string {
+    private encodeMerge(collateralToken: string, conditionId: string, amount: bigint): string {
         return CTF_INTERFACE.encodeFunctionData(
             "mergePositions(address,bytes32,bytes32,uint256[],uint256)",
-            [collateralToken, ethers.constants.HashZero, conditionId, [1, 2], amount]
+            [collateralToken, ethers.ZeroHash, conditionId, [1, 2], amount]
         );
     }
 
     private encodeRedeem(collateralToken: string, conditionId: string): string {
         return CTF_INTERFACE.encodeFunctionData(
             "redeemPositions(address,bytes32,bytes32,uint256[])",
-            [collateralToken, ethers.constants.HashZero, conditionId, [1, 2]]
+            [collateralToken, ethers.ZeroHash, conditionId, [1, 2]]
         );
     }
 
@@ -173,14 +172,17 @@ export class AdvancedPositionManager {
      * Split USDC into conditional tokens
      * Converts collateral into YES/NO outcome tokens
      */
-    async splitPosition(params: SplitPositionParams): Promise<ethers.providers.TransactionReceipt> {
+    async splitPosition(params: SplitPositionParams): Promise<TransactionReceipt> {
         logger.info(`📊 Splitting position: ${params.amount} USDC for condition ${params.conditionId}`);
 
-        const amount = ethers.utils.parseUnits(params.amount, USDCE_DIGITS);
+        const amount = ethers.parseUnits(params.amount, USDCE_DIGITS);
         const data = this.encodeSplit(USDC_ADDRESS, params.conditionId, amount);
         const to = params.negRisk ? NEG_RISK_ADAPTER_ADDRESS : CONDITIONAL_TOKENS_FRAMEWORK_ADDRESS;
 
         if (this.useProxyWallet && this.proxyFactory) {
+            const proxyFactory = this.proxyFactory as ethers.Contract & {
+                proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+            };
             const proxyTxn = {
                 to: to,
                 typeCode: "1",
@@ -188,32 +190,34 @@ export class AdvancedPositionManager {
                 value: "0",
             };
 
-            const txn = await this.proxyFactory.proxy([proxyTxn], {
-                gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+            const txn = await proxyFactory.proxy([proxyTxn], {
+                gasPrice: ethers.parseUnits('100', 'gwei'),
             });
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Position split successful`);
-            return receipt;
+            return receipt!;
         } else {
             // Direct transaction for non-proxy wallets
-            const contract = new ethers.Contract(to, ctfAbi, this.wallet);
+            const contract = new ethers.Contract(to, ctfAbi, this.wallet) as ethers.Contract & {
+                splitPosition: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+            };
             const txn = await contract.splitPosition(
                 USDC_ADDRESS,
-                ethers.constants.HashZero,
+                ethers.ZeroHash,
                 params.conditionId,
                 [1, 2],
                 amount,
                 {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 }
             );
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Position split successful`);
-            return receipt;
+            return receipt!;
         }
     }
 
@@ -221,14 +225,17 @@ export class AdvancedPositionManager {
      * Merge conditional tokens back into USDC
      * Combines YES/NO tokens to recover collateral
      */
-    async mergePosition(params: MergePositionParams): Promise<ethers.providers.TransactionReceipt> {
+    async mergePosition(params: MergePositionParams): Promise<TransactionReceipt> {
         logger.info(`📊 Merging position: ${params.amount} tokens for condition ${params.conditionId}`);
 
-        const amount = ethers.utils.parseUnits(params.amount, USDCE_DIGITS);
+        const amount = ethers.parseUnits(params.amount, USDCE_DIGITS);
         const data = this.encodeMerge(USDC_ADDRESS, params.conditionId, amount);
         const to = params.negRisk ? NEG_RISK_ADAPTER_ADDRESS : CONDITIONAL_TOKENS_FRAMEWORK_ADDRESS;
 
         if (this.useProxyWallet && this.proxyFactory) {
+            const proxyFactory = this.proxyFactory as ethers.Contract & {
+                proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+            };
             const proxyTxn = {
                 to: to,
                 typeCode: "1",
@@ -236,38 +243,40 @@ export class AdvancedPositionManager {
                 value: "0",
             };
 
-            const txn = await this.proxyFactory.proxy([proxyTxn], {
-                gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+            const txn = await proxyFactory.proxy([proxyTxn], {
+                gasPrice: ethers.parseUnits('100', 'gwei'),
             });
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Position merged successful`);
-            return receipt;
+            return receipt!;
         } else {
-            const contract = new ethers.Contract(to, ctfAbi, this.wallet);
+            const contract = new ethers.Contract(to, ctfAbi, this.wallet) as ethers.Contract & {
+                mergePositions: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+            };
             const txn = await contract.mergePositions(
                 USDC_ADDRESS,
-                ethers.constants.HashZero,
+                ethers.ZeroHash,
                 params.conditionId,
                 [1, 2],
                 amount,
                 {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 }
             );
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Position merged successful`);
-            return receipt;
+            return receipt!;
         }
     }
 
     /**
      * Redeem winning positions after market resolution
      */
-    async redeemPosition(params: RedeemPositionParams): Promise<ethers.providers.TransactionReceipt> {
+    async redeemPosition(params: RedeemPositionParams): Promise<TransactionReceipt> {
         logger.info(`💰 Redeeming position for condition ${params.conditionId}`);
 
         if (params.negRisk && params.amounts) {
@@ -275,6 +284,9 @@ export class AdvancedPositionManager {
             const to = NEG_RISK_ADAPTER_ADDRESS;
 
             if (this.useProxyWallet && this.proxyFactory) {
+                const proxyFactory = this.proxyFactory as ethers.Contract & {
+                    proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+                };
                 const proxyTxn = {
                     to: to,
                     typeCode: "1",
@@ -282,30 +294,35 @@ export class AdvancedPositionManager {
                     value: "0",
                 };
 
-                const txn = await this.proxyFactory.proxy([proxyTxn], {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                const txn = await proxyFactory.proxy([proxyTxn], {
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 });
 
                 logger.info(`   - Transaction hash: ${txn.hash}`);
                 const receipt = await txn.wait();
                 logger.info(`   ✅ Position redeemed successfully`);
-                return receipt;
+                return receipt!;
             } else {
-                const contract = new ethers.Contract(to, negRiskAdapterAbi, this.wallet);
+                const contract = new ethers.Contract(to, negRiskAdapterAbi, this.wallet) as ethers.Contract & {
+                    redeemPositions: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+                };
                 const txn = await contract.redeemPositions(params.conditionId, params.amounts, {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 });
 
                 logger.info(`   - Transaction hash: ${txn.hash}`);
                 const receipt = await txn.wait();
                 logger.info(`   ✅ Position redeemed successfully`);
-                return receipt;
+                return receipt!;
             }
         } else {
             const data = this.encodeRedeem(USDC_ADDRESS, params.conditionId);
             const to = CONDITIONAL_TOKENS_FRAMEWORK_ADDRESS;
 
             if (this.useProxyWallet && this.proxyFactory) {
+                const proxyFactory = this.proxyFactory as ethers.Contract & {
+                    proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+                };
                 const proxyTxn = {
                     to: to,
                     typeCode: "1",
@@ -313,30 +330,32 @@ export class AdvancedPositionManager {
                     value: "0",
                 };
 
-                const txn = await this.proxyFactory.proxy([proxyTxn], {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                const txn = await proxyFactory.proxy([proxyTxn], {
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 });
 
                 logger.info(`   - Transaction hash: ${txn.hash}`);
                 const receipt = await txn.wait();
                 logger.info(`   ✅ Position redeemed successfully`);
-                return receipt;
+                return receipt!;
             } else {
-                const contract = new ethers.Contract(to, ctfAbi, this.wallet);
+                const contract = new ethers.Contract(to, ctfAbi, this.wallet) as ethers.Contract & {
+                    redeemPositions: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+                };
                 const txn = await contract.redeemPositions(
                     USDC_ADDRESS,
-                    ethers.constants.HashZero,
+                    ethers.ZeroHash,
                     params.conditionId,
                     [1, 2],
                     {
-                        gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                        gasPrice: ethers.parseUnits('100', 'gwei'),
                     }
                 );
 
                 logger.info(`   - Transaction hash: ${txn.hash}`);
                 const receipt = await txn.wait();
                 logger.info(`   ✅ Position redeemed successfully`);
-                return receipt;
+                return receipt!;
             }
         }
     }
@@ -344,7 +363,7 @@ export class AdvancedPositionManager {
     /**
      * Convert positions between outcomes (for neg-risk markets)
      */
-    async convertPosition(params: ConvertPositionParams): Promise<ethers.providers.TransactionReceipt> {
+    async convertPosition(params: ConvertPositionParams): Promise<TransactionReceipt> {
         logger.info(`🔄 Converting position for market ${params.marketId}`);
 
         const indexSet = getIndexSet(params.questionIds);
@@ -352,6 +371,9 @@ export class AdvancedPositionManager {
         const to = NEG_RISK_ADAPTER_ADDRESS;
 
         if (this.useProxyWallet && this.proxyFactory) {
+            const proxyFactory = this.proxyFactory as ethers.Contract & {
+                proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+            };
             const proxyTxn = {
                 to: to,
                 typeCode: "1",
@@ -359,31 +381,33 @@ export class AdvancedPositionManager {
                 value: "0",
             };
 
-            const txn = await this.proxyFactory.proxy([proxyTxn], {
-                gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+            const txn = await proxyFactory.proxy([proxyTxn], {
+                gasPrice: ethers.parseUnits('100', 'gwei'),
             });
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Position converted successfully`);
-            return receipt;
+            return receipt!;
         } else {
-            const contract = new ethers.Contract(to, negRiskAdapterAbi, this.wallet);
+            const contract = new ethers.Contract(to, negRiskAdapterAbi, this.wallet) as ethers.Contract & {
+                convertPositions: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+            };
             const txn = await contract.convertPositions(params.marketId, indexSet, params.amount, {
-                gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                gasPrice: ethers.parseUnits('100', 'gwei'),
             });
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Position converted successfully`);
-            return receipt;
+            return receipt!;
         }
     }
 
     /**
      * Approve tokens for trading
      */
-    async approveTokens(params: ApproveParams): Promise<ethers.providers.TransactionReceipt> {
+    async approveTokens(params: ApproveParams): Promise<TransactionReceipt> {
         logger.info(`✅ Approving ${params.token} for ${params.spender}`);
 
         let data: string;
@@ -391,8 +415,8 @@ export class AdvancedPositionManager {
 
         if (params.token === 'USDC') {
             const amount = params.amount
-                ? ethers.utils.parseUnits(params.amount, USDCE_DIGITS)
-                : ethers.constants.MaxUint256;
+                ? ethers.parseUnits(params.amount, USDCE_DIGITS)
+                : ethers.MaxUint256;
             data = this.encodeErc20Approve(params.spender, amount);
             to = USDC_ADDRESS;
         } else {
@@ -402,6 +426,9 @@ export class AdvancedPositionManager {
         }
 
         if (this.useProxyWallet && this.proxyFactory) {
+            const proxyFactory = this.proxyFactory as ethers.Contract & {
+                proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+            };
             const proxyTxn = {
                 to: to,
                 typeCode: "1",
@@ -409,66 +436,72 @@ export class AdvancedPositionManager {
                 value: "0",
             };
 
-            const txn = await this.proxyFactory.proxy([proxyTxn], {
-                gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+            const txn = await proxyFactory.proxy([proxyTxn], {
+                gasPrice: ethers.parseUnits('100', 'gwei'),
             });
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Approval successful`);
-            return receipt;
+            return receipt!;
         } else {
             const contract = new ethers.Contract(
                 to,
                 params.token === 'USDC' ? erc20Abi : erc1155Abi,
                 this.wallet
-            );
+            ) as ethers.Contract & {
+                approve?: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+                setApprovalForAll?: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+            };
 
             let txn;
             if (params.token === 'USDC') {
                 const amount = params.amount
-                    ? ethers.utils.parseUnits(params.amount, USDCE_DIGITS)
-                    : ethers.constants.MaxUint256;
-                txn = await contract.approve(params.spender, amount, {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                    ? ethers.parseUnits(params.amount, USDCE_DIGITS)
+                    : ethers.MaxUint256;
+                txn = await contract.approve!(params.spender, amount, {
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 });
             } else {
                 const approved = params.approved !== undefined ? params.approved : true;
-                txn = await contract.setApprovalForAll(params.spender, approved, {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                txn = await contract.setApprovalForAll!(params.spender, approved, {
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 });
             }
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Approval successful`);
-            return receipt;
+            return receipt!;
         }
     }
 
     /**
      * Transfer tokens
      */
-    async transferTokens(params: TransferParams): Promise<ethers.providers.TransactionReceipt> {
+    async transferTokens(params: TransferParams): Promise<TransactionReceipt> {
         logger.info(`💸 Transferring ${params.amount} ${params.tokenType} to ${params.to}`);
 
         let data: string;
         let to: string;
 
         if (params.tokenType === 'USDC') {
-            const amount = ethers.utils.parseUnits(params.amount, USDCE_DIGITS);
+            const amount = ethers.parseUnits(params.amount, USDCE_DIGITS);
             data = this.encodeErc20Transfer(params.to, amount);
             to = USDC_ADDRESS;
         } else {
             if (!params.tokenId) {
                 throw new Error('Token ID required for outcome token transfer');
             }
-            const amount = ethers.utils.parseUnits(params.amount, USDCE_DIGITS);
+            const amount = ethers.parseUnits(params.amount, USDCE_DIGITS);
             data = this.encodeErc1155TransferFrom(this.wallet.address, params.to, params.tokenId, amount);
             to = CONDITIONAL_TOKENS_FRAMEWORK_ADDRESS;
         }
 
         if (this.useProxyWallet && this.proxyFactory) {
+            const proxyFactory = this.proxyFactory as ethers.Contract & {
+                proxy: (txns: any[], options?: any) => Promise<ethers.ContractTransactionResponse>;
+            };
             const proxyTxn = {
                 to: to,
                 typeCode: "1",
@@ -476,37 +509,40 @@ export class AdvancedPositionManager {
                 value: "0",
             };
 
-            const txn = await this.proxyFactory.proxy([proxyTxn], {
-                gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+            const txn = await proxyFactory.proxy([proxyTxn], {
+                gasPrice: ethers.parseUnits('100', 'gwei'),
             });
 
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Transfer successful`);
-            return receipt;
+            return receipt!;
         } else {
             const contract = new ethers.Contract(
                 to,
                 params.tokenType === 'USDC' ? erc20Abi : erc1155Abi,
                 this.wallet
-            );
+            ) as ethers.Contract & {
+                transfer?: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+                safeTransferFrom?: (...args: any[]) => Promise<ethers.ContractTransactionResponse>;
+            };
 
             let txn;
             if (params.tokenType === 'USDC') {
-                const amount = ethers.utils.parseUnits(params.amount, USDCE_DIGITS);
-                txn = await contract.transfer(params.to, amount, {
-                    gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                const amount = ethers.parseUnits(params.amount, USDCE_DIGITS);
+                txn = await contract.transfer!(params.to, amount, {
+                    gasPrice: ethers.parseUnits('100', 'gwei'),
                 });
             } else {
-                const amount = ethers.utils.parseUnits(params.amount, USDCE_DIGITS);
-                txn = await contract.safeTransferFrom(
+                const amount = ethers.parseUnits(params.amount, USDCE_DIGITS);
+                txn = await contract.safeTransferFrom!(
                     this.wallet.address,
                     params.to,
                     params.tokenId!,
                     amount,
-                    ethers.constants.HashZero,
+                    ethers.ZeroHash,
                     {
-                        gasPrice: ethers.utils.parseUnits('100', 'gwei'),
+                        gasPrice: ethers.parseUnits('100', 'gwei'),
                     }
                 );
             }
@@ -514,7 +550,7 @@ export class AdvancedPositionManager {
             logger.info(`   - Transaction hash: ${txn.hash}`);
             const receipt = await txn.wait();
             logger.info(`   ✅ Transfer successful`);
-            return receipt;
+            return receipt!;
         }
     }
 
@@ -529,18 +565,22 @@ export class AdvancedPositionManager {
      * Get USDC balance
      */
     async getUSDCBalance(): Promise<string> {
-        const contract = new ethers.Contract(USDC_ADDRESS, erc20Abi, this.wallet);
+        const contract = new ethers.Contract(USDC_ADDRESS, erc20Abi, this.wallet) as ethers.Contract & {
+            balanceOf: (address: string) => Promise<bigint>;
+        };
         const balance = await contract.balanceOf(this.wallet.address);
-        return ethers.utils.formatUnits(balance, USDCE_DIGITS);
+        return ethers.formatUnits(balance, USDCE_DIGITS);
     }
 
     /**
      * Get outcome token balance
      */
     async getOutcomeTokenBalance(tokenId: string): Promise<string> {
-        const contract = new ethers.Contract(CONDITIONAL_TOKENS_FRAMEWORK_ADDRESS, erc1155Abi, this.wallet);
+        const contract = new ethers.Contract(CONDITIONAL_TOKENS_FRAMEWORK_ADDRESS, erc1155Abi, this.wallet) as ethers.Contract & {
+            balanceOf: (address: string, tokenId: string) => Promise<bigint>;
+        };
         const balance = await contract.balanceOf(this.wallet.address, tokenId);
-        return ethers.utils.formatUnits(balance, USDCE_DIGITS);
+        return ethers.formatUnits(balance, USDCE_DIGITS);
     }
 }
 

@@ -133,12 +133,12 @@ async function uploadSingleMemory(memory: ImmortalMemory): Promise<void> {
     contentType: 'application/json',
     redundancyType: 0, // REDUNDANCY_EC_TYPE
     payloadSize: Long.fromNumber(contentBuffer.length),
-    expectChecksums: [''],
+    expectChecksums: [new Uint8Array()],
   });
 
   // Simulate and broadcast
   const simulateInfo = await createObjectTx.simulate({ denom: 'BNB' });
-  await createObjectTx.broadcast({
+  const broadcastRes = await createObjectTx.broadcast({
     denom: 'BNB',
     gasLimit: Number(simulateInfo.gasLimit),
     gasPrice: simulateInfo.gasPrice || '5000000000',
@@ -147,13 +147,23 @@ async function uploadSingleMemory(memory: ImmortalMemory): Promise<void> {
     privateKey: ACCOUNT_PRIVATE_KEY,
   });
 
+  if (broadcastRes.code !== 0) {
+    throw new Error(`Object creation failed: ${broadcastRes.rawLog}`);
+  }
+
   // Upload object content
-  await greenfieldClient.object.putObject({
-    bucketName: BUCKET_NAME,
-    objectName: objectName,
-    body: contentBuffer,
-    txnHash: '', // Can be retrieved from broadcast response
-  });
+  await greenfieldClient.object.uploadObject(
+    {
+      bucketName: BUCKET_NAME,
+      objectName: objectName,
+      body: new File([contentBuffer], objectName, { type: 'application/json' }),
+      txnHash: broadcastRes.transactionHash,
+    },
+    {
+      type: 'ECDSA',
+      privateKey: ACCOUNT_PRIVATE_KEY,
+    }
+  );
 }
 
 /**
@@ -391,7 +401,7 @@ function calculateAgentPerformance(memories: ImmortalMemory[]): AgentPerformance
     return acc;
   }, {} as Record<string, number>);
   const bestStrategy = Object.keys(strategyCounts).reduce((a, b) =>
-    strategyCounts[a] > strategyCounts[b] ? a : b, ''
+    (strategyCounts[a] || 0) > (strategyCounts[b] || 0) ? a : b, ''
   );
 
   return {
@@ -427,10 +437,10 @@ function generateInsights(memories: ImmortalMemory[]) {
   }, {} as Record<string, number>);
 
   const bestAsset = Object.keys(assetPerformance).reduce((a, b) =>
-    assetPerformance[a] > assetPerformance[b] ? a : b, 'None'
+    (assetPerformance[a] || 0) > (assetPerformance[b] || 0) ? a : b, 'None'
   );
   const worstAsset = Object.keys(assetPerformance).reduce((a, b) =>
-    assetPerformance[a] < assetPerformance[b] ? a : b, 'None'
+    (assetPerformance[a] || 0) < (assetPerformance[b] || 0) ? a : b, 'None'
   );
 
   // Find best strategy
@@ -442,7 +452,7 @@ function generateInsights(memories: ImmortalMemory[]) {
   }, {} as Record<string, number>);
 
   const bestStrategy = Object.keys(strategyPerformance).reduce((a, b) =>
-    strategyPerformance[a] > strategyPerformance[b] ? a : b, 'None'
+    (strategyPerformance[a] || 0) > (strategyPerformance[b] || 0) ? a : b, 'None'
   );
 
   // Recommendations

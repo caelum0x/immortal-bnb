@@ -255,6 +255,13 @@ export class WebSocketService {
     }
 
     /**
+     * Emit a custom event with a specific event name
+     */
+    emitCustomEvent(eventName: string, data: any): void {
+        this.io.emit(eventName, data);
+    }
+
+    /**
      * Get number of connected clients
      */
     getConnectedClientsCount(): number {

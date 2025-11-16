@@ -352,10 +352,9 @@ async function startTradingBot() {
   console.log('\n' + colors.yellow + '⚠️  Press Ctrl+C to stop the bot gracefully' + colors.reset);
   console.log('═'.repeat(70) + '\n');
 
-  // Start the main bot (note: startBot is not exported yet, we need to fix that)
-  // For now, we'll import and run the main function
-  const { main } = await import('./src/index');
-  await main();
+  // Start the main bot with interval loop
+  const { startBot } = await import('./src/index');
+  await startBot();
 }
 
 async function main() {
