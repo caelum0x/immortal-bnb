@@ -174,7 +174,7 @@ export class PolymarketService {
     try {
       const usdcAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // USDC on Polygon
       const usdcAbi = ['function balanceOf(address) view returns (uint256)'];
-      const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, this.provider);
+      const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, this.provider) as any;
 
       const balance = await usdcContract.balanceOf(this.wallet.address);
       return parseFloat(ethers.formatUnits(balance, 6)); // USDC has 6 decimals
@@ -205,8 +205,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const markets = await this.client.getMarkets();
+      const markets = await client.getMarkets();
 
       return markets.slice(0, limit).map((market: any) => ({
         id: market.condition_id,
@@ -231,8 +233,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const market = await this.client.getMarket(marketId);
+      const market = await client.getMarket(marketId);
 
       if (!market) return null;
 
@@ -259,8 +263,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const orderbook = await this.client.getOrderBook(marketId);
+      const orderbook = await client.getOrderBook(marketId);
 
       return {
         marketId,
@@ -307,6 +313,8 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
       logger.info(`Creating ${params.side} order for market ${params.marketId}: ${params.size} @ ${params.price}`);
 
@@ -321,8 +329,8 @@ export class PolymarketService {
       };
 
       // Sign and submit order
-      const signedOrder = await this.client.createOrder(order);
-      const orderId = await this.client.postOrder(signedOrder);
+      const signedOrder = await client.createOrder(order);
+      const orderId = await client.postOrder(signedOrder);
 
       logger.info(`Order created successfully: ${orderId}`);
       return orderId;
@@ -341,8 +349,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      await this.client.cancelOrder(orderId);
+      await client.cancelOrder(orderId);
       logger.info(`Order ${orderId} cancelled successfully`);
       return true;
     } catch (error) {
@@ -359,8 +369,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const result = await this.client.cancelAll(marketId);
+      const result = await client.cancelAll(marketId);
       const cancelledCount = result.cancelled?.length || 0;
       logger.info(`Cancelled ${cancelledCount} orders`);
       return cancelledCount;
@@ -378,8 +390,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const orders = await this.client.getOrders({ market: marketId });
+      const orders = await client.getOrders({ market: marketId });
       return orders || [];
     } catch (error) {
       logger.error('Error fetching open orders:', error);
@@ -395,8 +409,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const positions = await this.client.getPositions();
+      const positions = await client.getPositions();
 
       return positions.map((pos: any) => ({
         marketId: pos.market,
@@ -471,8 +487,10 @@ export class PolymarketService {
       throw new Error('Polymarket client not initialized');
     }
 
+    const client = this.client; // Type narrowing
+
     try {
-      const time = await this.client.getServerTime();
+      const time = await client.getServerTime();
       return new Date(time.timestamp * 1000);
     } catch (error) {
       logger.error('Error fetching server time:', error);
