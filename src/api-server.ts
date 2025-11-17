@@ -11,6 +11,8 @@ import { fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
 import { getTrendingTokens } from './data/marketFetcher';
 import { CONFIG } from './config';
 import { BotState } from './bot-state';
+import { wormholeService } from './crossChain/wormholeService';
+import { ImmortalAIAgent } from './ai/immortalAgent';
 
 // Import middleware
 import {
@@ -35,6 +37,16 @@ import {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Initialize AI Agent singleton
+let aiAgent: ImmortalAIAgent | null = null;
+async function getAIAgent(): Promise<ImmortalAIAgent> {
+  if (!aiAgent) {
+    aiAgent = new ImmortalAIAgent();
+    await aiAgent.loadMemories();
+  }
+  return aiAgent;
+}
 
 // CORS configuration
 app.use(cors({
@@ -566,6 +578,251 @@ app.get('/api/token/:address', readLimiter, async (req: Request, res: Response) 
 });
 
 /**
+ * GET /api/crosschain/opportunities
+ * Get cross-chain arbitrage opportunities via Wormhole
+ * Protected with: read rate limiting
+ */
+app.get('/api/crosschain/opportunities', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const minProfit = parseFloat(req.query.minProfit as string) || 0.5;
+    const filter = (req.query.filter as string) || 'all';
+
+    // Initialize Wormhole service if needed
+    await wormholeService.initialize();
+
+    // Get supported tokens
+    const supportedTokens = wormholeService.getSupportedTokens();
+
+    // Calculate arbitrage opportunities for each token
+    const opportunities = await Promise.all(
+      supportedTokens.map(async (token, index) => {
+        try {
+          const opportunity = await wormholeService.calculateArbitrageOpportunity(token.symbol, '1000');
+
+          if (!opportunity.profitable || opportunity.profitPercent < minProfit) {
+            return null;
+          }
+
+          // Get quote for more details
+          const quote = await wormholeService.getQuote({
+            sourceChain: opportunity.priceOnBSC < opportunity.priceOnPolygon ? 'BSC' : 'Polygon',
+            targetChain: opportunity.priceOnBSC < opportunity.priceOnPolygon ? 'Polygon' : 'BSC',
+            token: token.symbol,
+            amount: '1000',
+            recipient: '0x0000000000000000000000000000000000000000',
+          });
+
+          return {
+            id: `arb_${Date.now()}_${index}`,
+            tokenSymbol: token.symbol,
+            tokenAddress: token.bscAddress,
+            sourceChain: opportunity.priceOnBSC < opportunity.priceOnPolygon ? 'BNB Chain' : 'Polygon',
+            targetChain: opportunity.priceOnBSC < opportunity.priceOnPolygon ? 'Polygon' : 'BNB Chain',
+            sourceDEX: opportunity.priceOnBSC < opportunity.priceOnPolygon ? 'PancakeSwap' : 'QuickSwap',
+            targetDEX: opportunity.priceOnBSC < opportunity.priceOnPolygon ? 'QuickSwap' : 'PancakeSwap',
+            sourcePrice: opportunity.priceOnBSC < opportunity.priceOnPolygon ? opportunity.priceOnBSC : opportunity.priceOnPolygon,
+            targetPrice: opportunity.priceOnBSC < opportunity.priceOnPolygon ? opportunity.priceOnPolygon : opportunity.priceOnBSC,
+            profitPercent: opportunity.profitPercent,
+            netProfit: parseFloat(opportunity.netProfit),
+            bridgeFee: parseFloat(quote.fee),
+            gasEstimate: parseFloat(opportunity.gasEstimate),
+            confidence: opportunity.profitPercent > 2 ? 0.9 : 0.7,
+            estimatedTime: quote.estimatedTime,
+          };
+        } catch (error) {
+          logger.warn(`Failed to calculate opportunity for ${token.symbol}:`, error);
+          return null;
+        }
+      })
+    );
+
+    const validOpportunities = opportunities.filter(o => o !== null);
+
+    res.json({
+      opportunities: validOpportunities,
+      total: validOpportunities.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error(`API /crosschain/opportunities error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/crosschain/execute
+ * Execute a cross-chain arbitrage trade
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/crosschain/execute', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { opportunityId, token, amount } = req.body;
+
+    if (!token || !amount) {
+      return res.status(400).json({ error: 'Token and amount are required' });
+    }
+
+    logger.info(`🔄 Executing cross-chain arbitrage: ${amount} ${token}`);
+
+    // Execute arbitrage via Wormhole service
+    const result = await wormholeService.executeArbitrage(token, amount);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Arbitrage execution failed',
+        steps: result.steps,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Arbitrage executed successfully',
+      profit: result.profit,
+      transactions: result.transactions,
+      steps: result.steps,
+    });
+  } catch (error) {
+    logger.error(`API /crosschain/execute error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/ai/metrics
+ * Get AI agent performance metrics
+ * Protected with: read rate limiting
+ */
+app.get('/api/ai/metrics', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const agent = await getAIAgent();
+    const memoryStats = agent.getMemoryStats();
+    const personality = agent.getPersonality();
+    const currentStrategy = agent.getCurrentStrategy();
+
+    res.json({
+      totalDecisions: memoryStats.totalTrades,
+      successfulDecisions: Math.round((memoryStats.successRate / 100) * memoryStats.totalTrades),
+      failedDecisions: memoryStats.totalTrades - Math.round((memoryStats.successRate / 100) * memoryStats.totalTrades),
+      averageConfidence: personality.confidenceThreshold,
+      learningRate: personality.learningRate,
+      memoryCount: memoryStats.totalMemories,
+      lastUpdate: Date.now(),
+      winRate: memoryStats.successRate,
+      avgReturn: memoryStats.avgReturn,
+      riskTolerance: personality.riskTolerance,
+      aggressiveness: personality.aggressiveness,
+      strategies: currentStrategy.totalStrategies,
+    });
+  } catch (error) {
+    logger.error(`API /ai/metrics error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/ai/decisions
+ * Get recent AI agent decisions from memory
+ * Protected with: read rate limiting
+ */
+app.get('/api/ai/decisions', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const agent = await getAIAgent();
+
+    // Fetch memories from Greenfield
+    const memoryIds = await fetchAllMemories();
+    const memories = await Promise.all(
+      memoryIds.slice(-limit).map(async (id) => {
+        const memory = await fetchMemory(id);
+        return memory;
+      })
+    );
+
+    const validMemories = memories.filter((m) => m !== null);
+
+    // Map to decision format
+    const decisions = validMemories.map((memory: any) => ({
+      id: memory.id,
+      timestamp: memory.timestamp,
+      action: memory.action.toUpperCase(),
+      token: memory.tokenSymbol,
+      amount: memory.amount,
+      confidence: 0.75, // Could be enhanced with actual confidence from memory
+      outcome: memory.outcome,
+      profitLoss: memory.profitLoss || 0,
+      reasoning: memory.aiReasoning || 'AI decision based on market conditions',
+      marketConditions: memory.marketConditions,
+    }));
+
+    res.json({
+      decisions: decisions.reverse(), // Newest first
+      total: decisions.length,
+    });
+  } catch (error) {
+    logger.error(`API /ai/decisions error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/ai/thresholds
+ * Get current dynamic thresholds computed from Greenfield data
+ * Protected with: read rate limiting
+ */
+app.get('/api/ai/thresholds', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const agent = await getAIAgent();
+    const thresholds = await agent.computeDynamicThresholds();
+
+    res.json({
+      minProfitability: thresholds.minProfitability,
+      optimalConfidence: thresholds.optimalConfidence,
+      maxRiskLevel: thresholds.maxRiskLevel,
+      suggestedTradeAmount: thresholds.suggestedTradeAmount,
+      computedAt: Date.now(),
+    });
+  } catch (error) {
+    logger.error(`API /ai/thresholds error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/ai/thresholds/recompute
+ * Recompute dynamic thresholds from latest Greenfield data
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/ai/thresholds/recompute', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const agent = await getAIAgent();
+
+    // Reload memories to get latest data
+    await agent.loadMemories();
+
+    // Recompute thresholds
+    const thresholds = await agent.computeDynamicThresholds();
+
+    logger.info('🔄 Dynamic thresholds recomputed');
+
+    res.json({
+      success: true,
+      message: 'Thresholds recomputed successfully',
+      thresholds: {
+        minProfitability: thresholds.minProfitability,
+        optimalConfidence: thresholds.optimalConfidence,
+        maxRiskLevel: thresholds.maxRiskLevel,
+        suggestedTradeAmount: thresholds.suggestedTradeAmount,
+        computedAt: Date.now(),
+      },
+    });
+  } catch (error) {
+    logger.error(`API /ai/thresholds/recompute error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * Health check
  * Protected with: health check rate limiting
  */
@@ -597,6 +854,12 @@ export function startAPIServer() {
     logger.info(`   POST /api/positions/:id/close`);
     logger.info(`   GET  /api/wallet/balance`);
     logger.info(`   GET  /api/token/:address`);
+    logger.info(`   GET  /api/crosschain/opportunities`);
+    logger.info(`   POST /api/crosschain/execute`);
+    logger.info(`   GET  /api/ai/metrics`);
+    logger.info(`   GET  /api/ai/decisions`);
+    logger.info(`   GET  /api/ai/thresholds`);
+    logger.info(`   POST /api/ai/thresholds/recompute`);
     logger.info(`   GET  /health`);
   });
 }
