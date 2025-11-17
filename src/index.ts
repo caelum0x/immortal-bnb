@@ -17,7 +17,7 @@ import 'reflect-metadata';
 import { logger } from './utils/logger';
 import { CONFIG } from './config';
 import { ImmortalAIAgent } from './ai/immortalAgent';
-import { startAPIServer } from './api/server';
+import { startAPIServer } from './api-server';
 import { telegramBotManager } from './alerts/telegramBot';
 import { storeMemory, initializeStorage } from './blockchain/memoryStorage';
 import { getTokenData, getTrendingTokens, calculateBuySellPressure } from './data/marketFetcher';

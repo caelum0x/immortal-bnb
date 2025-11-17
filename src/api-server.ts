@@ -6,6 +6,8 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
+import http from 'http';
+import path from 'path';
 import { logger } from './utils/logger';
 import { fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
 import { getTrendingTokens } from './data/marketFetcher';
@@ -14,6 +16,8 @@ import { BotState } from './bot-state';
 import { wormholeService } from './crossChain/wormholeService';
 import { ImmortalAIAgent } from './ai/immortalAgent';
 import { saveConfig, loadConfig, appendToConfig, getConfigOrDefault } from './utils/configStorage';
+import { WebSocketManager } from './services/webSocketManager';
+import { PolymarketAgentOrchestrator } from './services/polymarketAgentOrchestrator';
 
 // Import middleware
 import {
@@ -48,6 +52,108 @@ async function getAIAgent(): Promise<ImmortalAIAgent> {
   }
   return aiAgent;
 }
+
+// Initialize WebSocket Manager (global singleton)
+export const webSocketManager = new WebSocketManager();
+
+// Initialize Polymarket Agent Orchestrator (global singleton)
+const agentsPath = path.join(process.cwd(), 'agents');
+export const polymarketOrchestrator = new PolymarketAgentOrchestrator({
+  agentsPath,
+  maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB || 1.0,
+  minConfidence: 0.7,
+});
+
+// Wire Polymarket agent events to WebSocket notifications
+polymarketOrchestrator.on('decision', (decision) => {
+  logger.info(`🤖 Polymarket AI Decision: ${decision.action} ${decision.market}`);
+  webSocketManager.sendAIDecisionNotification({
+    id: decision.id,
+    timestamp: decision.timestamp,
+    action: decision.action,
+    market: decision.market,
+    confidence: decision.confidence,
+    reasoning: decision.reasoning,
+  });
+});
+
+polymarketOrchestrator.on('trade', async (trade) => {
+  logger.info(`💰 Polymarket Trade Executed: ${trade.action} ${trade.market} - P/L: ${trade.profitLoss}`);
+
+  // Send WebSocket notification
+  webSocketManager.sendTradeNotification({
+    id: trade.id,
+    timestamp: trade.timestamp,
+    type: 'polymarket',
+    token: trade.market,
+    action: trade.action,
+    amount: trade.amount,
+    profit: trade.profitLoss,
+    txHash: trade.transactionHash,
+  });
+
+  // Send Telegram notification if enabled
+  try {
+    const telegramConfig = await loadConfig<any>('telegram');
+    if (telegramConfig?.enabled && telegramConfig.notifications?.trades) {
+      const profitEmoji = trade.profitLoss > 0 ? '💚' : '❌';
+      const message = `${profitEmoji} *Polymarket Trade*\n\n` +
+        `Market: ${trade.market}\n` +
+        `Action: ${trade.action.toUpperCase()}\n` +
+        `Amount: ${trade.amount} USDC\n` +
+        `P/L: ${trade.profitLoss > 0 ? '+' : ''}${trade.profitLoss.toFixed(2)} USDC\n` +
+        `Time: ${new Date(trade.timestamp).toLocaleString()}`;
+
+      await fetch(`https://api.telegram.org/bot${telegramConfig.botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: telegramConfig.chatId,
+          text: message,
+          parse_mode: 'Markdown',
+        }),
+      });
+
+      await appendToConfig('telegram_messages', {
+        id: `msg_${Date.now()}`,
+        timestamp: Date.now(),
+        type: 'trade',
+        message,
+        status: 'sent',
+      });
+
+      webSocketManager.sendTelegramNotification({
+        id: `tg_${Date.now()}`,
+        timestamp: Date.now(),
+        type: 'trade',
+        message,
+        status: 'sent',
+      });
+    }
+  } catch (error) {
+    logger.warn('Failed to send Telegram notification:', error);
+  }
+});
+
+polymarketOrchestrator.on('started', () => {
+  logger.info('🚀 Polymarket Agent Started');
+  webSocketManager.sendNotification({
+    type: 'info',
+    title: 'Agent Started',
+    message: 'Polymarket trading agent is now running',
+    timestamp: Date.now(),
+  });
+});
+
+polymarketOrchestrator.on('stopped', () => {
+  logger.info('🛑 Polymarket Agent Stopped');
+  webSocketManager.sendNotification({
+    type: 'info',
+    title: 'Agent Stopped',
+    message: 'Polymarket trading agent has been stopped',
+    timestamp: Date.now(),
+  });
+});
 
 // CORS configuration
 app.use(cors({
@@ -1069,6 +1175,140 @@ app.post('/api/settings', botControlLimiter, async (req: Request, res: Response)
 });
 
 /**
+ * POST /api/polymarket-agent/start
+ * Start the Polymarket autonomous trading agent
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/polymarket-agent/start', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { maxTradeAmount, minConfidence } = req.body;
+
+    const status = polymarketOrchestrator.getStatus();
+    if (status.isRunning) {
+      return res.status(400).json({ error: 'Polymarket agent is already running' });
+    }
+
+    // Update config if provided
+    if (maxTradeAmount !== undefined) {
+      polymarketOrchestrator['config'].maxTradeAmount = maxTradeAmount;
+    }
+    if (minConfidence !== undefined) {
+      polymarketOrchestrator['config'].minConfidence = minConfidence;
+    }
+
+    await polymarketOrchestrator.start();
+
+    logger.info('✅ Polymarket agent started via API');
+
+    res.json({
+      success: true,
+      message: 'Polymarket trading agent started successfully',
+      config: {
+        maxTradeAmount: polymarketOrchestrator['config'].maxTradeAmount,
+        minConfidence: polymarketOrchestrator['config'].minConfidence,
+      },
+    });
+  } catch (error) {
+    logger.error(`API /polymarket-agent/start error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/polymarket-agent/stop
+ * Stop the Polymarket autonomous trading agent
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/polymarket-agent/stop', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const status = polymarketOrchestrator.getStatus();
+    if (!status.isRunning) {
+      return res.status(400).json({ error: 'Polymarket agent is not running' });
+    }
+
+    polymarketOrchestrator.stop();
+
+    logger.info('🛑 Polymarket agent stopped via API');
+
+    res.json({
+      success: true,
+      message: 'Polymarket trading agent stopped successfully',
+    });
+  } catch (error) {
+    logger.error(`API /polymarket-agent/stop error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket-agent/status
+ * Get Polymarket agent status and statistics
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket-agent/status', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const status = polymarketOrchestrator.getStatus();
+
+    res.json({
+      isRunning: status.isRunning,
+      startedAt: status.startedAt,
+      uptime: status.uptime,
+      totalDecisions: status.totalDecisions,
+      totalTrades: status.totalTrades,
+      totalProfit: status.totalProfit,
+      config: {
+        maxTradeAmount: polymarketOrchestrator['config'].maxTradeAmount,
+        minConfidence: polymarketOrchestrator['config'].minConfidence,
+      },
+    });
+  } catch (error) {
+    logger.error(`API /polymarket-agent/status error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket-agent/decisions
+ * Get recent Polymarket agent decisions
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket-agent/decisions', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const decisions = polymarketOrchestrator.getDecisions(limit);
+
+    res.json({
+      decisions: decisions.reverse(), // Newest first
+      total: decisions.length,
+    });
+  } catch (error) {
+    logger.error(`API /polymarket-agent/decisions error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket-agent/trades
+ * Get recent Polymarket agent trades
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket-agent/trades', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const trades = polymarketOrchestrator.getTrades(limit);
+
+    res.json({
+      trades: trades.reverse(), // Newest first
+      total: trades.length,
+      totalProfit: trades.reduce((sum, t) => sum + t.profitLoss, 0),
+    });
+  } catch (error) {
+    logger.error(`API /polymarket-agent/trades error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * Health check
  * Protected with: health check rate limiting
  */
@@ -1077,17 +1317,27 @@ app.get('/health', healthCheckLimiter, (req: Request, res: Response) => {
     status: 'ok',
     timestamp: Date.now(),
     botRunning: BotState.isRunning(),
+    polymarketAgentRunning: polymarketOrchestrator.getStatus().isRunning,
   });
 });
 
 /**
- * Start Express server
+ * Start Express server with WebSocket support
  */
 export function startAPIServer() {
-  app.listen(PORT, () => {
+  // Create HTTP server from Express app
+  const httpServer = http.createServer(app);
+
+  // Initialize WebSocket manager with HTTP server
+  webSocketManager.initialize(httpServer);
+  logger.info('🔌 WebSocket server initialized on path: /ws');
+
+  // Start listening
+  httpServer.listen(PORT, () => {
     logger.info(`🌐 API Server running on http://localhost:${PORT}`);
     logger.info(`📊 Dashboard: Connect frontend to this server`);
-    logger.info(`📝 Available endpoints:`);
+    logger.info(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
+    logger.info(`📝 Available endpoints (${30} total):`);
     logger.info(`   POST /api/start-bot`);
     logger.info(`   POST /api/stop-bot`);
     logger.info(`   GET  /api/bot-status`);
@@ -1112,8 +1362,15 @@ export function startAPIServer() {
     logger.info(`   POST /api/telegram/send`);
     logger.info(`   GET  /api/settings`);
     logger.info(`   POST /api/settings`);
+    logger.info(`   POST /api/polymarket-agent/start`);
+    logger.info(`   POST /api/polymarket-agent/stop`);
+    logger.info(`   GET  /api/polymarket-agent/status`);
+    logger.info(`   GET  /api/polymarket-agent/decisions`);
+    logger.info(`   GET  /api/polymarket-agent/trades`);
     logger.info(`   GET  /health`);
   });
+
+  return httpServer;
 }
 
 export { app };
