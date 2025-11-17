@@ -1035,6 +1035,94 @@ Based on this comprehensive analysis, provide a trading decision (BUY/SELL/HOLD)
   }
 
   /**
+   * Compute dynamic thresholds from historical Greenfield data
+   * Returns adaptive thresholds based on past performance
+   */
+  async computeDynamicThresholds(): Promise<{
+    minProfitability: number;
+    optimalConfidence: number;
+    maxRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    suggestedTradeAmount: number;
+  }> {
+    if (this.memories.size < 5) {
+      // Not enough data, return conservative defaults
+      return {
+        minProfitability: 0.60, // 60% minimum
+        optimalConfidence: 0.70, // 70% confidence
+        maxRiskLevel: 'LOW',
+        suggestedTradeAmount: 0.1, // 0.1 BNB
+      };
+    }
+
+    // Analyze profitable trades
+    const profitableTrades = Array.from(this.memories.values())
+      .filter(m => m.outcome === 'profit' && m.profitLoss && m.profitLoss > 0);
+
+    const losingTrades = Array.from(this.memories.values())
+      .filter(m => m.outcome === 'loss' && m.profitLoss && m.profitLoss < 0);
+
+    // Compute average profitability from winning trades
+    let avgProfitability = 0.60; // Default
+    if (profitableTrades.length > 0) {
+      const profits = profitableTrades.map(t => t.profitLoss || 0);
+      const avgProfit = profits.reduce((sum, p) => sum + p, 0) / profits.length;
+
+      // Convert to percentage profitability
+      // Assuming entry amounts, compute percentage return
+      avgProfitability = Math.max(0.50, Math.min(0.95, avgProfit / 100)); // Clamp 50-95%
+    }
+
+    // Compute optimal confidence threshold
+    // Analyze confidence levels of successful vs failed trades
+    let optimalConfidence = 0.70; // Default
+    if (profitableTrades.length > 0) {
+      const avgWinningConfidence = profitableTrades.reduce((sum, t) => sum + t.confidence, 0) / profitableTrades.length;
+      const avgLosingConfidence = losingTrades.length > 0
+        ? losingTrades.reduce((sum, t) => sum + t.confidence, 0) / losingTrades.length
+        : 0.5;
+
+      // Set threshold between average losing and winning confidence
+      optimalConfidence = Math.max(0.60, Math.min(0.90, (avgWinningConfidence + avgLosingConfidence) / 2 + 0.1));
+    }
+
+    // Determine max risk level based on win rate
+    const winRate = this.getSuccessRate();
+    let maxRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+    if (winRate > 70 && profitableTrades.length > 10) {
+      maxRiskLevel = 'HIGH';
+    } else if (winRate > 55 && profitableTrades.length > 5) {
+      maxRiskLevel = 'MEDIUM';
+    }
+
+    // Compute suggested trade amount based on avg return
+    const avgReturn = profitableTrades.length > 0
+      ? profitableTrades.reduce((sum, t) => sum + (t.profitLoss || 0), 0) / profitableTrades.length
+      : 0;
+
+    let suggestedTradeAmount = 0.1; // Base amount
+    if (avgReturn > 10 && winRate > 60) {
+      suggestedTradeAmount = 0.5; // Increase for good performance
+    } else if (avgReturn > 5 && winRate > 50) {
+      suggestedTradeAmount = 0.2;
+    } else if (winRate < 40) {
+      suggestedTradeAmount = 0.05; // Reduce for poor performance
+    }
+
+    logger.info('📊 Dynamic thresholds computed from Greenfield data:');
+    logger.info(`  Min Profitability: ${(avgProfitability * 100).toFixed(1)}%`);
+    logger.info(`  Optimal Confidence: ${(optimalConfidence * 100).toFixed(1)}%`);
+    logger.info(`  Max Risk Level: ${maxRiskLevel}`);
+    logger.info(`  Suggested Trade: ${suggestedTradeAmount} BNB`);
+
+    return {
+      minProfitability: avgProfitability,
+      optimalConfidence,
+      maxRiskLevel,
+      suggestedTradeAmount,
+    };
+  }
+
+  /**
    * Evolve trading strategies based on performance
    */
   private async evolveStrategies(newMemory: ExtendedTradeMemory): Promise<void> {

@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import { logger, logError } from '../utils/logger';
 import { withRetry, APIError } from '../utils/errorHandler';
 import { CONFIG } from '../config';
+import { tokenListValidator } from './tokenListValidator';
 
 export interface TokenData {
   address: string;
@@ -175,7 +176,10 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
   const boostedUrl = 'https://api.dexscreener.com/token-boosts/top/v1';
 
   try {
-    logger.info('Fetching trending tokens from DexScreener boosts...');
+    logger.info('🔍 Fetching trending tokens from DexScreener boosts...');
+
+    // Fetch and cache token lists for validation
+    await tokenListValidator.fetchTokenLists();
 
     const response = await fetch(boostedUrl);
 
@@ -192,7 +196,7 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
     const bnbTokens = boosts
       .filter((boost: any) => boost.chainId === 'bsc' && boost.tokenAddress)
       .map((boost: any) => boost.tokenAddress)
-      .slice(0, limit);
+      .slice(0, limit * 3); // Fetch more initially for filtering
 
     if (bnbTokens.length === 0) {
       logger.warn('No BNB tokens found in boosts, using fallback list');
@@ -201,10 +205,18 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
 
     logger.info(`Found ${bnbTokens.length} boosted BNB tokens`);
 
-    // Fetch detailed data for each token
+    // Validate against PancakeSwap token lists
+    const validatedTokens = tokenListValidator.filterValidTokens(bnbTokens);
+    const rejectedCount = bnbTokens.length - validatedTokens.length;
+
+    if (rejectedCount > 0) {
+      logger.info(`🛡️ Filtered out ${rejectedCount} non-validated tokens`);
+    }
+
+    // Fetch detailed data for each validated token
     const results: TokenData[] = [];
 
-    for (const tokenAddress of bnbTokens) {
+    for (const tokenAddress of validatedTokens) {
       try {
         const tokenData = await getTokenData(tokenAddress);
         if (tokenData) {
@@ -218,8 +230,22 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
       }
     }
 
-    logger.info(`Fetched ${results.length} trending tokens`);
-    return results;
+    // Compute dynamic volume threshold (average volume from results)
+    if (results.length > 0) {
+      const avgVolume = results.reduce((sum, token) => sum + token.volume24h, 0) / results.length;
+      logger.info(`📊 Dynamic volume threshold: $${avgVolume.toFixed(2)} (avg from ${results.length} tokens)`);
+
+      // Filter tokens by dynamic threshold (above average)
+      const filteredResults = results.filter(token => token.volume24h >= avgVolume);
+
+      if (filteredResults.length > 0) {
+        logger.info(`✅ ${filteredResults.length}/${results.length} tokens meet volume threshold`);
+        return filteredResults.slice(0, limit);
+      }
+    }
+
+    logger.info(`Fetched ${results.length} trending validated tokens`);
+    return results.slice(0, limit);
 
   } catch (error) {
     logError('getTrendingTokens', error as Error);

@@ -68,14 +68,29 @@ export default function MemoryPage() {
     try {
       setLoading(true)
 
-      const [memoriesRes, analyticsRes] = await Promise.all([
-        fetch('/api/memory/list'),
-        fetch('/api/memory/analytics'),
-      ])
+      // Use correct backend endpoint
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+      const response = await fetch(`${API_URL}/api/memories?limit=100`)
 
-      if (memoriesRes.ok) {
-        const data = await memoriesRes.json()
-        setMemories(data.memories || [])
+      if (response.ok) {
+        const data = await response.json()
+        // Map backend data to frontend structure
+        const mappedMemories = (data.memories || []).map((mem: any) => ({
+          id: mem.id,
+          timestamp: mem.timestamp,
+          category: mem.action || 'trade',
+          content: mem.aiReasoning || `${mem.action} ${mem.tokenSymbol}`,
+          chain: 'Greenfield',
+          objectId: mem.id,
+          bucketName: 'immortal-agent-memory',
+          metadata: {
+            tradePair: mem.tokenSymbol,
+            profit: mem.profitLoss,
+            strategy: mem.strategy || 'AI Decision',
+            outcome: mem.outcome,
+          },
+        }))
+        setMemories(mappedMemories)
       }
 
       if (analyticsRes.ok) {
