@@ -2207,6 +2207,9 @@ app.post('/api/arbitrage/simulate', readLimiter, async (req: Request, res: Respo
 import { getOrderMonitoringService } from './services/orderMonitoringService';
 const orderMonitoring = getOrderMonitoringService();
 
+import { getPriceFeedService } from './services/priceFeedService';
+const priceFeed = getPriceFeedService();
+
 /**
  * POST /api/orders/create
  * Create a new order (market, limit, stop-loss, take-profit, trailing-stop)
@@ -2434,6 +2437,152 @@ app.post('/api/orders/price-update', botControlLimiter, async (req: Request, res
   }
 });
 
+// ============================================================================
+// PRICE FEED ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /api/prices/:tokenId
+ * Get current price for a token
+ * Protected with: read rate limiting
+ */
+app.get('/api/prices/:tokenId', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tokenId } = req.params;
+
+    const priceData = priceFeed.getCurrentPrice(tokenId);
+
+    if (!priceData) {
+      return res.status(404).json({ error: 'Price data not found for this token' });
+    }
+
+    res.json(priceData);
+
+  } catch (error) {
+    logger.error(`Failed to get price: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/prices/:tokenId/history
+ * Get price history for a token
+ * Protected with: read rate limiting
+ */
+app.get('/api/prices/:tokenId/history', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tokenId } = req.params;
+    const { limit } = req.query;
+
+    const history = priceFeed.getPriceHistory(
+      tokenId,
+      limit ? parseInt(limit as string) : undefined
+    );
+
+    res.json({
+      tokenId,
+      history,
+      count: history.length,
+    });
+
+  } catch (error) {
+    logger.error(`Failed to get price history: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/prices/:tokenId/ohlcv
+ * Get OHLCV (candlestick) data for charting
+ * Protected with: read rate limiting
+ */
+app.get('/api/prices/:tokenId/ohlcv', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tokenId } = req.params;
+    const { interval = '1h', limit = '100' } = req.query;
+
+    const ohlcv = priceFeed.getOHLCV(
+      tokenId,
+      interval as any,
+      parseInt(limit as string)
+    );
+
+    res.json({
+      tokenId,
+      interval,
+      ohlcv,
+      count: ohlcv.length,
+    });
+
+  } catch (error) {
+    logger.error(`Failed to get OHLCV data: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/prices/watchlist/add
+ * Add token to price watchlist
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/prices/watchlist/add', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tokenId } = req.body;
+
+    if (!tokenId) {
+      return res.status(400).json({ error: 'tokenId is required' });
+    }
+
+    priceFeed.addToWatchlist(tokenId);
+
+    res.json({ success: true, message: 'Token added to watchlist' });
+
+  } catch (error) {
+    logger.error(`Failed to add to watchlist: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/prices/watchlist/remove
+ * Remove token from price watchlist
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/prices/watchlist/remove', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tokenId } = req.body;
+
+    if (!tokenId) {
+      return res.status(400).json({ error: 'tokenId is required' });
+    }
+
+    priceFeed.removeFromWatchlist(tokenId);
+
+    res.json({ success: true, message: 'Token removed from watchlist' });
+
+  } catch (error) {
+    logger.error(`Failed to remove from watchlist: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/prices/stats
+ * Get price feed statistics
+ * Protected with: read rate limiting
+ */
+app.get('/api/prices/stats', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const stats = priceFeed.getStats();
+
+    res.json(stats);
+
+  } catch (error) {
+    logger.error(`Failed to get price feed stats: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 /**
  * Health check
  * Protected with: health check rate limiting
@@ -2479,7 +2628,7 @@ export function startAPIServer() {
     logger.info(`🌐 API Server running on http://localhost:${PORT}`);
     logger.info(`📊 Dashboard: Connect frontend to this server`);
     logger.info(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
-    logger.info(`📝 Available endpoints (${57} total):`);
+    logger.info(`📝 Available endpoints (${63} total):`);
     logger.info(`   POST /api/start-bot`);
     logger.info(`   POST /api/stop-bot`);
     logger.info(`   GET  /api/bot-status`);
@@ -2535,12 +2684,22 @@ export function startAPIServer() {
     logger.info(`   POST /api/orders/:id/cancel`);
     logger.info(`   GET  /api/orders/stats`);
     logger.info(`   POST /api/orders/price-update`);
+    logger.info(`   GET  /api/prices/:tokenId`);
+    logger.info(`   GET  /api/prices/:tokenId/history`);
+    logger.info(`   GET  /api/prices/:tokenId/ohlcv`);
+    logger.info(`   POST /api/prices/watchlist/add`);
+    logger.info(`   POST /api/prices/watchlist/remove`);
+    logger.info(`   GET  /api/prices/stats`);
     logger.info(`   GET  /health`);
     logger.info(`   GET  /metrics`);
 
     // Initialize order monitoring service
     logger.info('🔍 Starting order monitoring service...');
     orderMonitoring.start(5000); // Check every 5 seconds
+
+    // Initialize price feed service
+    logger.info('📡 Starting price feed service...');
+    priceFeed.start(); // Fetch prices every 10 seconds
   });
 
   return httpServer;

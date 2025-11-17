@@ -276,6 +276,50 @@ export class WebSocketManager extends EventEmitter {
   }
 
   /**
+   * Send price update
+   */
+  sendPriceUpdate(priceData: {
+    tokenId: string;
+    price: number;
+    volume24h?: number;
+    priceChange24h?: number;
+    timestamp: number;
+    source: string;
+  }): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized');
+      return;
+    }
+
+    this.io.emit('priceUpdate', priceData);
+    logger.debug(`📊 Price update broadcast: ${priceData.tokenId} = $${priceData.price.toFixed(4)}`);
+  }
+
+  /**
+   * Send order execution notification
+   */
+  sendOrderExecutedNotification(order: {
+    orderId: string;
+    userId: string;
+    type: string;
+    side: string;
+    amount: number;
+    price: number;
+    reason: string;
+  }): void {
+    const notification: NotificationPayload = {
+      type: 'trade',
+      title: `Order Executed: ${order.type} ${order.side}`,
+      message: `${order.type} order executed at $${order.price.toFixed(4)} - ${order.reason}`,
+      data: order,
+      timestamp: Date.now(),
+      priority: 'high',
+    };
+
+    this.sendNotification(notification);
+  }
+
+  /**
    * Broadcast custom event to all clients
    */
   broadcast(event: string, data: any): void {

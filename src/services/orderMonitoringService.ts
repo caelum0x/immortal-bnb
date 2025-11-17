@@ -12,6 +12,7 @@ import { PrismaClient, OrderType, OrderStatus, TradeSide } from '../../generated
 import { logger } from '../utils/logger';
 import { EventEmitter } from 'events';
 import { metricsService } from './metricsService';
+import webSocketManager from './webSocketManager';
 
 const prisma = new PrismaClient();
 
@@ -327,6 +328,17 @@ class OrderMonitoringService extends EventEmitter {
 
       // Track metrics
       metricsService.trackOrderExecution(order.type, order.side);
+
+      // Send WebSocket notification
+      webSocketManager.sendOrderExecutedNotification({
+        orderId: order.id,
+        userId: order.userId,
+        type: order.type,
+        side: order.side,
+        amount: executedAmount,
+        price: executionPrice,
+        reason,
+      });
 
       logger.info(`✅ Order ${order.id} executed successfully`);
 
