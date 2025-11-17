@@ -1,8 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Production-Ready Prisma Schema for Immortal BNB
+// Comprehensive schema supporting trading, staking, social features, and analytics
 
 generator client {
   provider = "prisma-client-js"
@@ -14,15 +11,480 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================================
+// USER MANAGEMENT
+// ============================================================================
+
+model User {
+  id                   String   @id @default(uuid())
+  walletAddress        String   @unique
+  username             String?  @unique
+  email                String?  @unique
+  emailVerified        Boolean  @default(false)
+
+  // Profile
+  displayName          String?
+  bio                  String?
+  avatar               String?
+  website              String?
+  twitter              String?
+  telegram             String?
+
+  // Settings
+  notificationsEnabled Boolean  @default(true)
+  emailNotifications   Boolean  @default(true)
+  telegramNotifications Boolean @default(false)
+  pushNotifications    Boolean  @default(true)
+
+  // Privacy
+  publicProfile        Boolean  @default(true)
+  showTrades           Boolean  @default(true)
+  showPortfolio        Boolean  @default(false)
+
+  // Stats
+  totalTrades          Int      @default(0)
+  winRate              Float    @default(0)
+  totalPnL             Float    @default(0)
+  totalVolume          Float    @default(0)
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  lastLoginAt          DateTime @default(now())
+
+  // Relations
+  trades               Trade[]
+  positions            Position[]
+  orders               Order[]
+  agents               Agent[]
+  stakingPositions     StakingPosition[]
+  arbitrageExecutions  ArbitrageExecution[]
+  notifications        Notification[]
+  followers            Follow[] @relation("Following")
+  following            Follow[] @relation("Followers")
+  copyTradingLeader    CopyTrading[] @relation("Leader")
+  copyTradingFollower  CopyTrading[] @relation("Follower")
+
+  @@index([walletAddress])
+  @@index([username])
+  @@index([createdAt])
+  @@index([totalPnL])
+}
+
+model Follow {
+  id                   String   @id @default(uuid())
+  followerId           String
+  followingId          String
+  createdAt            DateTime @default(now())
+
+  follower             User     @relation("Followers", fields: [followerId], references: [id], onDelete: Cascade)
+  following            User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+// ============================================================================
+// TRADING
+// ============================================================================
+
+model Trade {
+  id                   String   @id @default(uuid())
+  userId               String
+  agentId              String?
+
+  // Market Info
+  marketId             String
+  marketQuestion       String
+  tokenId              String
+  outcome              String
+
+  // Trade Details
+  side                 TradeSide
+  type                 TradeType
+  amount               Float
+  price                Float
+  filledAmount         Float
+  avgFillPrice         Float?
+
+  // Fees & Costs
+  fee                  Float
+  gasCost              Float?
+  slippage             Float?
+
+  // Status
+  status               TradeStatus
+  txHash               String?
+  blockNumber          Int?
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  executedAt           DateTime?
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent                Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([agentId])
+  @@index([marketId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+model Position {
+  id                   String   @id @default(uuid())
+  userId               String
+
+  // Market Info
+  marketId             String
+  marketQuestion       String
+  tokenId              String
+  outcome              String
+
+  // Position Details
+  quantity             Float
+  avgEntryPrice        Float
+  currentPrice         Float
+  unrealizedPnL        Float
+  realizedPnL          Float    @default(0)
+
+  // Metadata
+  lastUpdatedPrice     DateTime @default(now())
+  closedAt             DateTime?
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tokenId])
+  @@index([userId])
+  @@index([marketId])
+  @@index([unrealizedPnL])
+}
+
+model Order {
+  id                   String   @id @default(uuid())
+  userId               String
+
+  // Market Info
+  marketId             String
+  marketQuestion       String
+  tokenId              String
+  outcome              String
+
+  // Order Details
+  side                 TradeSide
+  type                 OrderType
+  amount               Float
+  price                Float?
+  filledAmount         Float    @default(0)
+  remainingAmount      Float
+
+  // Advanced Order Types
+  stopLoss             Float?
+  takeProfit           Float?
+  trailingStop         Float?
+
+  // Status
+  status               OrderStatus
+  clobOrderId          String?  @unique
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  expiresAt            DateTime?
+  filledAt             DateTime?
+  cancelledAt          DateTime?
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([marketId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// AI AGENTS
+// ============================================================================
+
+model Agent {
+  id                   String   @id @default(uuid())
+  userId               String
+
+  // Agent Info
+  name                 String
+  description          String?
+  agentType            AgentType
+  strategyName         String
+
+  // Configuration
+  config               Json     // Stores strategy-specific config
+  maxTradeAmount       Float
+  minConfidence        Float
+  riskTolerance        Float
+  allowedMarkets       String[] // Array of market IDs or categories
+
+  // Performance
+  totalTrades          Int      @default(0)
+  winningTrades        Int      @default(0)
+  losingTrades         Int      @default(0)
+  totalPnL             Float    @default(0)
+  winRate              Float    @default(0)
+  sharpeRatio          Float?
+  maxDrawdown          Float?
+
+  // Status
+  active               Boolean  @default(false)
+  lastRunAt            DateTime?
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades               Trade[]
+  decisions            AgentDecision[]
+
+  @@index([userId])
+  @@index([active])
+  @@index([totalPnL])
+  @@index([winRate])
+}
+
+model AgentDecision {
+  id                   String   @id @default(uuid())
+  agentId              String
+
+  // Decision Details
+  marketId             String
+  marketQuestion       String
+  decision             String   // BUY, SELL, HOLD
+  confidence           Float
+  reasoning            String?
+
+  // Prediction
+  predictedOutcome     String?
+  predictedProbability Float?
+
+  // Execution
+  executed             Boolean  @default(false)
+  executedTradeId      String?
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+
+  // Relations
+  agent                Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([marketId])
+  @@index([createdAt])
+  @@index([executed])
+}
+
+// ============================================================================
+// STAKING & TOKEN
+// ============================================================================
+
+model StakingPosition {
+  id                   String   @id @default(uuid())
+  userId               String
+
+  // Staking Details
+  poolId               String
+  poolName             String
+  amount               Float
+  shares               Float    // LP shares or stake shares
+
+  // Rewards
+  rewardsClaimed       Float    @default(0)
+  pendingRewards       Float    @default(0)
+  lastRewardCalc       DateTime @default(now())
+
+  // Lock Details
+  lockPeriod           Int?     // in seconds
+  unlockedAt           DateTime?
+
+  // APY at time of staking
+  apy                  Float
+
+  // Status
+  active               Boolean  @default(true)
+
+  // Timestamps
+  stakedAt             DateTime @default(now())
+  unstakedAt           DateTime?
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([poolId])
+  @@index([active])
+}
+
+model TokenHolder {
+  id                   String   @id @default(uuid())
+  address              String   @unique
+  balance              Float
+  percentOfSupply      Float
+  rank                 Int?
+
+  // Transaction stats
+  totalReceived        Float    @default(0)
+  totalSent            Float    @default(0)
+  txCount              Int      @default(0)
+
+  // Timestamps
+  firstSeenAt          DateTime @default(now())
+  lastUpdatedAt        DateTime @updatedAt
+
+  @@index([balance])
+  @@index([rank])
+}
+
+// ============================================================================
+// ARBITRAGE & DEFI
+// ============================================================================
+
+model ArbitrageExecution {
+  id                   String   @id @default(uuid())
+  userId               String
+
+  // Opportunity Details
+  opportunityId        String
+  tokenPair            String
+  buyDex               String
+  sellDex              String
+
+  // Amounts
+  loanAmount           Float
+  profit               Float
+  profitPercentage     Float
+
+  // Costs
+  flashLoanFee         Float
+  gasCost              Float
+  totalCost            Float
+  netProfit            Float
+
+  // Execution
+  status               ArbitrageStatus
+  txHash               String?
+  blockNumber          Int?
+  errorMessage         String?
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  executedAt           DateTime?
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([status])
+  @@index([netProfit])
+}
+
+// ============================================================================
+// SOCIAL FEATURES
+// ============================================================================
+
+model CopyTrading {
+  id                   String   @id @default(uuid())
+  followerId           String
+  leaderId             String
+
+  // Copy Settings
+  copyAmount           Float?   // Fixed amount per trade
+  copyPercentage       Float?   // Percentage of leader's trade
+  maxPerTrade          Float
+  stopLoss             Float?
+
+  // Markets to copy
+  allowedMarkets       String[]
+
+  // Performance
+  totalCopied          Int      @default(0)
+  totalPnL             Float    @default(0)
+
+  // Status
+  active               Boolean  @default(true)
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+  pausedAt             DateTime?
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  follower             User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  leader               User     @relation("Leader", fields: [leaderId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, leaderId])
+  @@index([followerId])
+  @@index([leaderId])
+  @@index([active])
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id                   String   @id @default(uuid())
+  userId               String
+
+  // Notification Details
+  type                 NotificationType
+  title                String
+  message              String
+  data                 Json?    // Additional data (trade details, market info, etc.)
+
+  // Status
+  read                 Boolean  @default(false)
+  readAt               DateTime?
+
+  // Channels
+  sentEmail            Boolean  @default(false)
+  sentTelegram         Boolean  @default(false)
+  sentPush             Boolean  @default(false)
+
+  // Timestamps
+  createdAt            DateTime @default(now())
+
+  // Relations
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@index([type])
+}
+
+// ============================================================================
+// EXISTING MODELS (Legacy - kept for backward compatibility)
+// ============================================================================
+
 model Models {
   id                   String   @id @default(uuid())
   name                 String   @unique
-  openRoutermodelName            String
+  openRoutermodelName  String
   lighterApiKey        String
   invocationCount      Int      @default(0)
   invocations          Invocations[]
   portfolioSize        PortfolioSize[]
-  accountIndex         String      
+  accountIndex         String
   @@index([name])
 }
 
@@ -59,6 +521,77 @@ model PortfolioSize {
   model                Models   @relation(fields: [modelId], references: [id])
 
   @@index([modelId])
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+enum TradeType {
+  MARKET
+  LIMIT
+  STOP_LOSS
+  TAKE_PROFIT
+}
+
+enum TradeStatus {
+  PENDING
+  EXECUTED
+  FAILED
+  CANCELLED
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP_LOSS
+  TAKE_PROFIT
+  TRAILING_STOP
+}
+
+enum OrderStatus {
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  EXPIRED
+  REJECTED
+}
+
+enum AgentType {
+  POLYMARKET
+  DEX_ARBITRAGE
+  FLASH_LOAN
+  CUSTOM
+}
+
+enum ArbitrageStatus {
+  DETECTED
+  SIMULATED
+  EXECUTING
+  SUCCESS
+  FAILED
+}
+
+enum NotificationType {
+  TRADE_EXECUTED
+  TRADE_FAILED
+  ORDER_FILLED
+  ORDER_CANCELLED
+  AGENT_DECISION
+  AGENT_TRADE
+  AGENT_ERROR
+  STAKING_REWARD
+  ARBITRAGE_SUCCESS
+  ARBITRAGE_FAILED
+  PRICE_ALERT
+  POSITION_ALERT
+  SYSTEM_ALERT
 }
 
 enum ToolCallType {
