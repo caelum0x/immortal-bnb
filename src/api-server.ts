@@ -20,6 +20,7 @@ import { WebSocketManager } from './services/webSocketManager';
 import { PolymarketAgentOrchestrator } from './services/polymarketAgentOrchestrator';
 import { polymarketService } from './services/polymarketService';
 import { clobClient } from './services/clobClient';
+import { initializeContractService, getContractService } from './services/contractService';
 
 // Import middleware
 import {
@@ -156,6 +157,36 @@ polymarketOrchestrator.on('stopped', () => {
     timestamp: Date.now(),
   });
 });
+
+// ============================================================================
+// Initialize Smart Contract Service
+// ============================================================================
+let contractService: ReturnType<typeof getContractService> | null = null;
+
+try {
+  const rpcUrl = process.env.OPBNB_RPC || process.env.BNB_MAINNET_RPC || 'https://bsc-dataseed.bnbchain.org';
+  const network = process.env.CONTRACT_NETWORK || 'bsc';
+
+  contractService = initializeContractService({
+    tokenAddress: process.env.IMMBOT_TOKEN_CONTRACT,
+    stakingAddress: process.env.STAKING_CONTRACT,
+    arbitrageAddress: process.env.FLASH_LOAN_ARBITRAGE_CONTRACT,
+    rpcUrl,
+    network,
+    privateKey: process.env.WALLET_PRIVATE_KEY, // Optional - only needed for transactions
+  });
+
+  logger.info('✅ Smart Contract Service initialized', {
+    network,
+    hasWallet: !!process.env.WALLET_PRIVATE_KEY,
+    tokenContract: process.env.IMMBOT_TOKEN_CONTRACT || 'not configured',
+    stakingContract: process.env.STAKING_CONTRACT || 'not configured',
+    arbitrageContract: process.env.FLASH_LOAN_ARBITRAGE_CONTRACT || 'not configured',
+  });
+} catch (error) {
+  logger.warn('⚠️  Smart Contract Service not initialized:', (error as Error).message);
+  logger.warn('   Contract endpoints will return 503. Configure contracts in .env to enable.');
+}
 
 // CORS configuration
 app.use(cors({
@@ -1731,6 +1762,440 @@ app.get('/api/polymarket-agent/trades', readLimiter, async (req: Request, res: R
   }
 });
 
+// ============================================================================
+// TOKEN ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /api/token/info
+ * Get IMMBOT token information (name, symbol, supply, tax config)
+ * Protected with: read rate limiting
+ */
+app.get('/api/token/info', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('token')) {
+      return res.status(503).json({
+        error: 'Token contract not configured',
+        message: 'Set IMMBOT_TOKEN_CONTRACT in .env to enable token features',
+      });
+    }
+
+    const tokenInfo = await contractService.getTokenInfo();
+
+    res.json({
+      ...tokenInfo,
+      contractAddress: process.env.IMMBOT_TOKEN_CONTRACT,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /token/info error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/token/balance/:address
+ * Get token balance for a specific address
+ * Protected with: read rate limiting
+ */
+app.get('/api/token/balance/:address', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('token')) {
+      return res.status(503).json({
+        error: 'Token contract not configured',
+      });
+    }
+
+    const { address } = req.params;
+
+    // Basic address validation
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return res.status(400).json({ error: 'Invalid Ethereum address' });
+    }
+
+    const balance = await contractService.getTokenBalance(address);
+    const nativeBalance = await contractService.getNativeBalance(address);
+
+    res.json({
+      ...balance,
+      nativeBalance,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /token/balance error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/token/stats
+ * Get token statistics (supply, holders, volume)
+ * Protected with: read rate limiting
+ */
+app.get('/api/token/stats', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('token')) {
+      return res.status(503).json({
+        error: 'Token contract not configured',
+      });
+    }
+
+    const [tokenInfo, gasPrice] = await Promise.all([
+      contractService.getTokenInfo(),
+      contractService.getGasPrice(),
+    ]);
+
+    // Calculate burned amount (assuming initial supply - current supply)
+    const burned = 0; // This would need to be calculated from blockchain events
+
+    res.json({
+      totalSupply: tokenInfo.totalSupply,
+      decimals: tokenInfo.decimals,
+      taxPercentage: tokenInfo.taxPercentage,
+      burnPercentage: tokenInfo.burnPercentage,
+      liquidityPercentage: tokenInfo.liquidityPercentage,
+      totalBurned: burned,
+      circulatingSupply: tokenInfo.totalSupply,
+      gasPrice: gasPrice + ' gwei',
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /token/stats error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/token/transfer
+ * Transfer tokens to another address
+ * Protected with: bot control rate limiting (write operation)
+ */
+app.post('/api/token/transfer', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('token')) {
+      return res.status(503).json({
+        error: 'Token contract not configured',
+      });
+    }
+
+    if (!contractService.isWalletConnected()) {
+      return res.status(400).json({
+        error: 'Wallet not connected',
+        message: 'Set WALLET_PRIVATE_KEY in .env to enable transactions',
+      });
+    }
+
+    const { recipient, amount } = req.body;
+
+    if (!recipient || !amount) {
+      return res.status(400).json({ error: 'Missing recipient or amount' });
+    }
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(recipient)) {
+      return res.status(400).json({ error: 'Invalid recipient address' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+
+    logger.info(`Token transfer initiated: ${amount} IMMBOT to ${recipient}`);
+
+    const txHash = await contractService.transferToken(recipient, amount);
+
+    res.json({
+      success: true,
+      txHash,
+      recipient,
+      amount,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /token/transfer error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// ============================================================================
+// STAKING ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /api/staking/pools
+ * Get all staking pools with APY information
+ * Protected with: read rate limiting
+ */
+app.get('/api/staking/pools', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('staking')) {
+      return res.status(503).json({
+        error: 'Staking contract not configured',
+        message: 'Set STAKING_CONTRACT in .env to enable staking features',
+      });
+    }
+
+    const pools = await contractService.getStakingPools();
+
+    res.json({
+      pools,
+      total: pools.length,
+      contractAddress: process.env.STAKING_CONTRACT,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /staking/pools error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/staking/stats
+ * Get global staking statistics
+ * Protected with: read rate limiting
+ */
+app.get('/api/staking/stats', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('staking')) {
+      return res.status(503).json({
+        error: 'Staking contract not configured',
+      });
+    }
+
+    const userAddress = req.query.address as string | undefined;
+    const stats = await contractService.getStakingStats(userAddress);
+
+    res.json({
+      ...stats,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /staking/stats error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/staking/user/:address
+ * Get user's staking positions
+ * Protected with: read rate limiting
+ */
+app.get('/api/staking/user/:address', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('staking')) {
+      return res.status(503).json({
+        error: 'Staking contract not configured',
+      });
+    }
+
+    const { address } = req.params;
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return res.status(400).json({ error: 'Invalid Ethereum address' });
+    }
+
+    const stakes = await contractService.getUserStakes(address);
+
+    res.json({
+      stakes,
+      total: stakes.length,
+      address,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /staking/user error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/staking/stake
+ * Create a new stake
+ * Protected with: bot control rate limiting (write operation)
+ */
+app.post('/api/staking/stake', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('staking')) {
+      return res.status(503).json({
+        error: 'Staking contract not configured',
+      });
+    }
+
+    if (!contractService.isWalletConnected()) {
+      return res.status(400).json({
+        error: 'Wallet not connected',
+        message: 'Set WALLET_PRIVATE_KEY in .env to enable transactions',
+      });
+    }
+
+    const { amount, lockPeriodId } = req.body;
+
+    if (amount === undefined || lockPeriodId === undefined) {
+      return res.status(400).json({ error: 'Missing amount or lockPeriodId' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+
+    const lockId = parseInt(lockPeriodId);
+    if (isNaN(lockId) || lockId < 0) {
+      return res.status(400).json({ error: 'Invalid lockPeriodId' });
+    }
+
+    logger.info(`Staking initiated: ${amount} IMMBOT with lock period ${lockId}`);
+
+    const txHash = await contractService.stake(amount, lockId);
+
+    res.json({
+      success: true,
+      txHash,
+      amount,
+      lockPeriodId: lockId,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /staking/stake error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/staking/withdraw
+ * Withdraw a stake
+ * Protected with: bot control rate limiting (write operation)
+ */
+app.post('/api/staking/withdraw', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('staking')) {
+      return res.status(503).json({
+        error: 'Staking contract not configured',
+      });
+    }
+
+    if (!contractService.isWalletConnected()) {
+      return res.status(400).json({
+        error: 'Wallet not connected',
+      });
+    }
+
+    const { stakeIndex } = req.body;
+
+    if (stakeIndex === undefined) {
+      return res.status(400).json({ error: 'Missing stakeIndex' });
+    }
+
+    const index = parseInt(stakeIndex);
+    if (isNaN(index) || index < 0) {
+      return res.status(400).json({ error: 'Invalid stakeIndex' });
+    }
+
+    logger.info(`Withdrawing stake index: ${index}`);
+
+    const txHash = await contractService.withdraw(index);
+
+    res.json({
+      success: true,
+      txHash,
+      stakeIndex: index,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /staking/withdraw error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/staking/claim
+ * Claim rewards from a stake
+ * Protected with: bot control rate limiting (write operation)
+ */
+app.post('/api/staking/claim', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('staking')) {
+      return res.status(503).json({
+        error: 'Staking contract not configured',
+      });
+    }
+
+    if (!contractService.isWalletConnected()) {
+      return res.status(400).json({
+        error: 'Wallet not connected',
+      });
+    }
+
+    const { stakeIndex } = req.body;
+
+    if (stakeIndex === undefined) {
+      return res.status(400).json({ error: 'Missing stakeIndex' });
+    }
+
+    const index = parseInt(stakeIndex);
+    if (isNaN(index) || index < 0) {
+      return res.status(400).json({ error: 'Invalid stakeIndex' });
+    }
+
+    logger.info(`Claiming rewards from stake index: ${index}`);
+
+    const txHash = await contractService.claimRewards(index);
+
+    res.json({
+      success: true,
+      txHash,
+      stakeIndex: index,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /staking/claim error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// ============================================================================
+// ARBITRAGE ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /api/arbitrage/simulate
+ * Simulate a flash loan arbitrage opportunity
+ * Protected with: read rate limiting
+ */
+app.post('/api/arbitrage/simulate', readLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!contractService || !contractService.isContractInitialized('arbitrage')) {
+      return res.status(503).json({
+        error: 'Arbitrage contract not configured',
+        message: 'Set FLASH_LOAN_ARBITRAGE_CONTRACT in .env to enable arbitrage features',
+      });
+    }
+
+    const { loanAmount, buyRouter, sellRouter, buyPath, sellPath, minProfit } = req.body;
+
+    if (!loanAmount || !buyRouter || !sellRouter || !buyPath || !sellPath || !minProfit) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    const simulation = await contractService.simulateArbitrage(
+      loanAmount,
+      buyRouter,
+      sellRouter,
+      buyPath,
+      sellPath,
+      minProfit
+    );
+
+    res.json({
+      ...simulation,
+      network: process.env.CONTRACT_NETWORK || 'bsc',
+    });
+  } catch (error) {
+    logger.error(`API /arbitrage/simulate error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 /**
  * Health check
  * Protected with: health check rate limiting
@@ -1760,7 +2225,7 @@ export function startAPIServer() {
     logger.info(`🌐 API Server running on http://localhost:${PORT}`);
     logger.info(`📊 Dashboard: Connect frontend to this server`);
     logger.info(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
-    logger.info(`📝 Available endpoints (${39} total):`);
+    logger.info(`📝 Available endpoints (${50} total):`);
     logger.info(`   POST /api/start-bot`);
     logger.info(`   POST /api/stop-bot`);
     logger.info(`   GET  /api/bot-status`);
@@ -1799,6 +2264,17 @@ export function startAPIServer() {
     logger.info(`   GET  /api/polymarket-agent/status`);
     logger.info(`   GET  /api/polymarket-agent/decisions`);
     logger.info(`   GET  /api/polymarket-agent/trades`);
+    logger.info(`   GET  /api/token/info`);
+    logger.info(`   GET  /api/token/balance/:address`);
+    logger.info(`   GET  /api/token/stats`);
+    logger.info(`   POST /api/token/transfer`);
+    logger.info(`   GET  /api/staking/pools`);
+    logger.info(`   GET  /api/staking/stats`);
+    logger.info(`   GET  /api/staking/user/:address`);
+    logger.info(`   POST /api/staking/stake`);
+    logger.info(`   POST /api/staking/withdraw`);
+    logger.info(`   POST /api/staking/claim`);
+    logger.info(`   POST /api/arbitrage/simulate`);
     logger.info(`   GET  /health`);
   });
 
