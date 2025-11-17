@@ -21,6 +21,7 @@ import { PolymarketAgentOrchestrator } from './services/polymarketAgentOrchestra
 import { polymarketService } from './services/polymarketService';
 import { clobClient } from './services/clobClient';
 import { initializeContractService, getContractService } from './services/contractService';
+import { metricsService } from './services/metricsService';
 
 // Import middleware
 import {
@@ -208,6 +209,9 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Prometheus metrics tracking
+app.use(metricsService.trackHttp);
 
 /**
  * POST /api/start-bot
@@ -2210,6 +2214,22 @@ app.get('/health', healthCheckLimiter, (req: Request, res: Response) => {
 });
 
 /**
+ * GET /metrics
+ * Prometheus metrics endpoint
+ * No rate limiting - Prometheus needs frequent scrapes
+ */
+app.get('/metrics', async (req: Request, res: Response) => {
+  try {
+    const metrics = await metricsService.getMetrics();
+    res.setHeader('Content-Type', metricsService.getContentType());
+    res.send(metrics);
+  } catch (error) {
+    logger.error(`Metrics endpoint error: ${(error as Error).message}`);
+    res.status(500).send('Error generating metrics');
+  }
+});
+
+/**
  * Start Express server with WebSocket support
  */
 export function startAPIServer() {
@@ -2225,7 +2245,7 @@ export function startAPIServer() {
     logger.info(`🌐 API Server running on http://localhost:${PORT}`);
     logger.info(`📊 Dashboard: Connect frontend to this server`);
     logger.info(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
-    logger.info(`📝 Available endpoints (${50} total):`);
+    logger.info(`📝 Available endpoints (${51} total):`);
     logger.info(`   POST /api/start-bot`);
     logger.info(`   POST /api/stop-bot`);
     logger.info(`   GET  /api/bot-status`);
@@ -2276,6 +2296,7 @@ export function startAPIServer() {
     logger.info(`   POST /api/staking/claim`);
     logger.info(`   POST /api/arbitrage/simulate`);
     logger.info(`   GET  /health`);
+    logger.info(`   GET  /metrics`);
   });
 
   return httpServer;
