@@ -13,6 +13,7 @@ import { CONFIG } from './config';
 import { BotState } from './bot-state';
 import { wormholeService } from './crossChain/wormholeService';
 import { ImmortalAIAgent } from './ai/immortalAgent';
+import { saveConfig, loadConfig, appendToConfig, getConfigOrDefault } from './utils/configStorage';
 
 // Import middleware
 import {
@@ -823,6 +824,251 @@ app.post('/api/ai/thresholds/recompute', botControlLimiter, async (req: Request,
 });
 
 /**
+ * GET /api/telegram/config
+ * Get Telegram bot configuration
+ * Protected with: read rate limiting
+ */
+app.get('/api/telegram/config', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const config = await getConfigOrDefault('telegram', {
+      enabled: false,
+      botToken: '',
+      chatId: '',
+      notifications: {
+        trades: true,
+        opportunities: true,
+        errors: true,
+        dailySummary: true,
+      },
+      filters: {
+        minProfitPercent: 1.0,
+        minConfidence: 0.7,
+      },
+    });
+
+    // Don't expose sensitive bot token in response (only show if it exists)
+    res.json({
+      ...config,
+      botToken: config.botToken ? '***' + config.botToken.slice(-8) : '',
+      hasToken: !!config.botToken,
+    });
+  } catch (error) {
+    logger.error(`API /telegram/config error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/telegram/config
+ * Save Telegram bot configuration
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/telegram/config', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { enabled, botToken, chatId, notifications, filters } = req.body;
+
+    // Validate required fields if enabled
+    if (enabled && (!botToken || !chatId)) {
+      return res.status(400).json({
+        error: 'Bot token and chat ID are required when Telegram is enabled',
+      });
+    }
+
+    const config = {
+      enabled: !!enabled,
+      botToken: botToken || '',
+      chatId: chatId || '',
+      notifications: notifications || {
+        trades: true,
+        opportunities: true,
+        errors: true,
+        dailySummary: true,
+      },
+      filters: filters || {
+        minProfitPercent: 1.0,
+        minConfidence: 0.7,
+      },
+      updatedAt: Date.now(),
+    };
+
+    await saveConfig('telegram', config);
+
+    logger.info('✅ Telegram configuration saved');
+
+    res.json({
+      success: true,
+      message: 'Telegram configuration saved successfully',
+    });
+  } catch (error) {
+    logger.error(`API /telegram/config POST error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/telegram/messages
+ * Get recent Telegram messages sent
+ * Protected with: read rate limiting
+ */
+app.get('/api/telegram/messages', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 50;
+    const messages = await getConfigOrDefault<any[]>('telegram_messages', []);
+
+    res.json({
+      messages: messages.slice(-limit).reverse(), // Most recent first
+      total: messages.length,
+    });
+  } catch (error) {
+    logger.error(`API /telegram/messages error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/telegram/send
+ * Send a message via Telegram (for testing or manual notifications)
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/telegram/send', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { message, type = 'manual' } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Load Telegram config
+    const config = await loadConfig<any>('telegram');
+
+    if (!config || !config.enabled || !config.botToken || !config.chatId) {
+      return res.status(400).json({
+        error: 'Telegram bot is not configured. Please configure in settings.',
+      });
+    }
+
+    // Send message via Telegram API
+    const telegramResponse = await fetch(
+      `https://api.telegram.org/bot${config.botToken}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: config.chatId,
+          text: message,
+          parse_mode: 'Markdown',
+        }),
+      }
+    );
+
+    const telegramData = await telegramResponse.json();
+
+    if (!telegramData.ok) {
+      throw new Error(telegramData.description || 'Failed to send Telegram message');
+    }
+
+    // Log message to history
+    const messageRecord = {
+      id: `msg_${Date.now()}`,
+      timestamp: Date.now(),
+      type,
+      message,
+      status: 'sent',
+    };
+
+    await appendToConfig('telegram_messages', messageRecord);
+
+    logger.info(`📤 Telegram message sent: ${type}`);
+
+    res.json({
+      success: true,
+      message: 'Message sent successfully',
+      telegramResponse: telegramData,
+    });
+  } catch (error) {
+    logger.error(`API /telegram/send error: ${(error as Error).message}`);
+
+    // Log failed message
+    try {
+      await appendToConfig('telegram_messages', {
+        id: `msg_${Date.now()}`,
+        timestamp: Date.now(),
+        type: req.body.type || 'manual',
+        message: req.body.message,
+        status: 'failed',
+        error: (error as Error).message,
+      });
+    } catch (logError) {
+      // Ignore logging errors
+    }
+
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/settings
+ * Get user settings
+ * Protected with: read rate limiting
+ */
+app.get('/api/settings', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const settings = await getConfigOrDefault('user_settings', {
+      theme: 'dark',
+      defaultRiskLevel: 'MEDIUM',
+      autoTrading: false,
+      notifications: {
+        desktop: true,
+        sound: true,
+      },
+      trading: {
+        defaultSlippage: 0.5,
+        maxTradeAmount: 1.0,
+        stopLoss: 10,
+        takeProfit: 20,
+      },
+      display: {
+        currency: 'USD',
+        decimals: 4,
+        chartType: 'candlestick',
+      },
+    });
+
+    res.json(settings);
+  } catch (error) {
+    logger.error(`API /settings error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/settings
+ * Save user settings
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/settings', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const settings = {
+      ...req.body,
+      updatedAt: Date.now(),
+    };
+
+    await saveConfig('user_settings', settings);
+
+    logger.info('✅ User settings saved');
+
+    res.json({
+      success: true,
+      message: 'Settings saved successfully',
+      settings,
+    });
+  } catch (error) {
+    logger.error(`API /settings POST error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * Health check
  * Protected with: health check rate limiting
  */
@@ -860,6 +1106,12 @@ export function startAPIServer() {
     logger.info(`   GET  /api/ai/decisions`);
     logger.info(`   GET  /api/ai/thresholds`);
     logger.info(`   POST /api/ai/thresholds/recompute`);
+    logger.info(`   GET  /api/telegram/config`);
+    logger.info(`   POST /api/telegram/config`);
+    logger.info(`   GET  /api/telegram/messages`);
+    logger.info(`   POST /api/telegram/send`);
+    logger.info(`   GET  /api/settings`);
+    logger.info(`   POST /api/settings`);
     logger.info(`   GET  /health`);
   });
 }
