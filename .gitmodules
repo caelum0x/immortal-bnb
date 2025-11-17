@@ -19,3 +19,6 @@
 [submodule "polymarket-uma-adapter"]
 	path = polymarket-uma-adapter
 	url = https://github.com/Polymarket/uma-ctf-adapter.git
+[submodule "perpetual-trading"]
+	path = perpetual-trading
+	url = https://github.com/gautamtayal1/perpetual-trading.git
