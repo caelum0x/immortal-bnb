@@ -28,6 +28,7 @@ import {
   TopTrader,
 } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
+import TradingViewChart from '@/components/TradingViewChart';
 
 interface MarketWithAnalysis extends PolymarketMarket {
   analysis?: AIMarketAnalysis;
@@ -46,6 +47,7 @@ export default function PolymarketDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [selectedMarketForChart, setSelectedMarketForChart] = useState<PolymarketMarket | null>(null);
   const [activeTab, setActiveTab] = useState<'markets' | 'leaderboard'>('markets');
 
   // Load initial data
@@ -260,6 +262,32 @@ export default function PolymarketDashboard() {
       {/* Markets Tab */}
       {activeTab === 'markets' && (
         <>
+      {/* Price Chart for Selected Market */}
+      {selectedMarketForChart && (
+        <div className="card p-6 mb-6">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="text-xl font-semibold text-white">
+                {selectedMarketForChart.question}
+              </h3>
+              <p className="text-sm text-gray-400">Market ID: {selectedMarketForChart.id}</p>
+            </div>
+            <button
+              onClick={() => setSelectedMarketForChart(null)}
+              className="text-gray-400 hover:text-white transition-colors text-2xl"
+            >
+              ✕
+            </button>
+          </div>
+          <TradingViewChart
+            tokenId={selectedMarketForChart.id}
+            interval="1h"
+            height={500}
+            showVolumeChart={true}
+          />
+        </div>
+      )}
+
       {/* Trending Markets with AI Analysis */}
       <div className="card p-6">
         <h3 className="text-xl font-bold mb-4">📈 Trending Markets</h3>
@@ -281,13 +309,22 @@ export default function PolymarketDashboard() {
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={() => analyzeMarket(market)}
-                  disabled={market.analyzing}
-                  className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
-                >
-                  {market.analyzing ? '🤖 Analyzing...' : '🧠 AI Analysis'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSelectedMarketForChart(market)}
+                    className="btn-secondary px-4 py-2 text-sm"
+                    title="View price chart"
+                  >
+                    📊 Chart
+                  </button>
+                  <button
+                    onClick={() => analyzeMarket(market)}
+                    disabled={market.analyzing}
+                    className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    {market.analyzing ? '🤖 Analyzing...' : '🧠 AI Analysis'}
+                  </button>
+                </div>
               </div>
 
               {/* AI Analysis Results */}
