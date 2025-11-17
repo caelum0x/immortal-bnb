@@ -19,6 +19,7 @@ import { saveConfig, loadConfig, appendToConfig, getConfigOrDefault } from './ut
 import { WebSocketManager } from './services/webSocketManager';
 import { PolymarketAgentOrchestrator } from './services/polymarketAgentOrchestrator';
 import { polymarketService } from './services/polymarketService';
+import { clobClient } from './services/clobClient';
 
 // Import middleware
 import {
@@ -1221,15 +1222,76 @@ app.get('/api/polymarket/balance', readLimiter, async (req: Request, res: Respon
 
 /**
  * GET /api/polymarket/positions
- * Get active Polymarket positions
+ * Get active Polymarket positions via Python bridge
  * Protected with: read rate limiting
  */
 app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Response) => {
   try {
-    // Get positions from Polymarket agent orchestrator if available
-    const agentTrades = polymarketOrchestrator.getTrades(100);
+    const walletAddress = process.env.POLYGON_WALLET_ADDRESS;
+    const privateKey = process.env.POLYGON_WALLET_PRIVATE_KEY;
 
-    // Group by market to calculate positions
+    if (!walletAddress || !privateKey) {
+      // Fallback to calculating from agent trades if CLOB not available
+      const agentTrades = polymarketOrchestrator.getTrades(100);
+      const positionMap = new Map<string, any>();
+
+      agentTrades.forEach(trade => {
+        if (!positionMap.has(trade.market)) {
+          positionMap.set(trade.market, {
+            marketId: trade.market.replace(/\s+/g, '_').toLowerCase(),
+            market: trade.market,
+            side: trade.action,
+            shares: 0,
+            avgPrice: 0,
+            currentPrice: 0.5,
+            pnl: 0,
+            roi: 0,
+          });
+        }
+
+        const position = positionMap.get(trade.market)!;
+        if (trade.action === 'buy') {
+          position.shares += trade.amount;
+        } else {
+          position.shares -= trade.amount;
+        }
+        position.pnl += trade.profitLoss;
+      });
+
+      const positions = Array.from(positionMap.values()).filter(p => p.shares > 0);
+      return res.json({
+        positions,
+        total: positions.length,
+        source: 'calculated_from_trades',
+        note: 'Configure wallet for real CLOB positions',
+      });
+    }
+
+    // Try to get real positions from CLOB bridge
+    if (clobClient.isBridgeAvailable()) {
+      const clobPositions = await clobClient.getPositions();
+
+      const formattedPositions = clobPositions.map(pos => ({
+        marketId: pos.tokenId,
+        market: pos.market,
+        side: pos.side,
+        shares: pos.size,
+        avgPrice: pos.entryPrice,
+        currentPrice: pos.currentPrice,
+        pnl: pos.pnl,
+        roi: pos.entryPrice > 0 ? ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100 : 0,
+      }));
+
+      return res.json({
+        positions: formattedPositions,
+        total: formattedPositions.length,
+        source: 'clob_bridge',
+        bridgeAvailable: true,
+      });
+    }
+
+    // Fallback to calculated positions if bridge not available
+    const agentTrades = polymarketOrchestrator.getTrades(100);
     const positionMap = new Map<string, any>();
 
     agentTrades.forEach(trade => {
@@ -1257,7 +1319,13 @@ app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Resp
 
     const positions = Array.from(positionMap.values()).filter(p => p.shares > 0);
 
-    res.json({ positions, total: positions.length });
+    res.json({
+      positions,
+      total: positions.length,
+      source: 'calculated_from_trades',
+      note: 'CLOB Bridge not running. Start it with: python src/services/clobBridge.py',
+      bridgeAvailable: false,
+    });
   } catch (error) {
     logger.error(`API /polymarket/positions error: ${(error as Error).message}`);
     res.status(500).json({ error: (error as Error).message });
@@ -1266,30 +1334,52 @@ app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Resp
 
 /**
  * GET /api/polymarket/orders
- * Get active Polymarket CLOB orders (requires wallet authentication)
+ * Get active Polymarket CLOB orders via Python bridge
  * Protected with: read rate limiting
  */
 app.get('/api/polymarket/orders', readLimiter, async (req: Request, res: Response) => {
   try {
-    // Getting personal orders requires authenticated CLOB API access
-    // This would need the Python Polymarket client with wallet signature
-    // TODO: Integrate with Python polymarket.py client for authenticated CLOB access
-
     const walletAddress = process.env.POLYGON_WALLET_ADDRESS;
+    const privateKey = process.env.POLYGON_WALLET_PRIVATE_KEY;
 
-    if (!walletAddress) {
+    if (!walletAddress || !privateKey) {
       return res.json({
         orders: [],
         total: 0,
-        note: 'Wallet not configured. Set POLYGON_WALLET_ADDRESS to view orders.'
+        note: 'Wallet not configured. Set POLYGON_WALLET_ADDRESS and POLYGON_WALLET_PRIVATE_KEY to view orders.',
+        bridgeAvailable: clobClient.isBridgeAvailable(),
       });
     }
 
-    // For now, return empty as CLOB queries require authentication
+    // Check if Python CLOB bridge is running
+    if (!clobClient.isBridgeAvailable()) {
+      return res.json({
+        orders: [],
+        total: 0,
+        note: 'CLOB Bridge not running. Start it with: python src/services/clobBridge.py',
+        bridgeAvailable: false,
+      });
+    }
+
+    // Fetch orders from Python CLOB client via bridge
+    const orders = await clobClient.getOrders();
+
+    // Transform to frontend format
+    const formattedOrders = orders.map(order => ({
+      id: order.id,
+      marketId: order.marketId,
+      market: 'Market name from Gamma API', // Would lookup from Gamma
+      side: order.side.toLowerCase(),
+      price: order.price,
+      size: order.size,
+      status: order.status,
+      timestamp: order.timestamp,
+    }));
+
     res.json({
-      orders: [],
-      total: 0,
-      note: 'CLOB order fetching requires authenticated API access with wallet signature'
+      orders: formattedOrders,
+      total: formattedOrders.length,
+      bridgeAvailable: true,
     });
   } catch (error) {
     logger.error(`API /polymarket/orders error: ${(error as Error).message}`);
