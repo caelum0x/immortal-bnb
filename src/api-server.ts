@@ -2467,6 +2467,81 @@ app.get('/api/prices/stats', readLimiter, async (req: Request, res: Response) =>
   }
 });
 
+// ============================================================================
+// RISK MANAGEMENT ENDPOINTS
+// ============================================================================
+
+import { getRiskManagementService } from './services/riskManagementService';
+const riskManagement = getRiskManagementService();
+
+/**
+ * GET /api/risk/portfolio
+ * Get comprehensive portfolio risk analysis
+ * Protected with: read rate limiting
+ */
+app.get('/api/risk/portfolio', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const userId = req.query.userId as string | undefined;
+
+    const risk = await riskManagement.getPortfolioRisk(userId);
+
+    res.json(risk);
+
+  } catch (error) {
+    logger.error(`Failed to get portfolio risk: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/risk/recommendations
+ * Get risk management recommendations
+ * Protected with: read rate limiting
+ */
+app.get('/api/risk/recommendations', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const userId = req.query.userId as string | undefined;
+
+    const recommendations = await riskManagement.getRiskRecommendations(userId);
+
+    res.json({ recommendations });
+
+  } catch (error) {
+    logger.error(`Failed to get risk recommendations: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/risk/position-size
+ * Calculate optimal position size for a trade
+ * Protected with: read rate limiting
+ */
+app.post('/api/risk/position-size', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { portfolioValue, entryPrice, stopLossPrice, riskPercent } = req.body;
+
+    if (!portfolioValue || !entryPrice || !stopLossPrice) {
+      return res.status(400).json({
+        error: 'portfolioValue, entryPrice, and stopLossPrice are required',
+      });
+    }
+
+    const result = riskManagement.calculatePositionSize(
+      parseFloat(portfolioValue),
+      parseFloat(entryPrice),
+      parseFloat(stopLossPrice),
+      riskPercent ? parseFloat(riskPercent) : undefined
+    );
+
+    res.json(result);
+
+  } catch (error) {
+    logger.error(`Failed to calculate position size: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 /**
  * Health check
  * Protected with: health check rate limiting
