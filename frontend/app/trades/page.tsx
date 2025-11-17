@@ -48,13 +48,48 @@ export default function TradesPage() {
   const fetchTrades = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/trades?limit=100&filter=${filter}&sort=${sortBy}`)
+      // Use correct backend endpoint /api/trade-logs
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+      const response = await fetch(`${apiUrl}/api/trade-logs?limit=100`)
       if (response.ok) {
         const data = await response.json()
-        setTrades(data.trades || [])
+        // Map backend data structure to frontend structure
+        const mappedTrades = (data.trades || []).map((trade: any) => ({
+          id: trade.id,
+          timestamp: trade.timestamp,
+          type: trade.action.toUpperCase() as 'BUY' | 'SELL',
+          chain: 'BNB' as const,
+          platform: 'PancakeSwap V3',
+          tokenIn: trade.action === 'buy' ? 'BNB' : trade.tokenSymbol,
+          tokenOut: trade.action === 'buy' ? trade.tokenSymbol : 'BNB',
+          amountIn: trade.amount.toString(),
+          amountOut: (trade.amount * trade.price).toString(),
+          priceImpact: 0.5,
+          gasUsed: '0.001',
+          profit: trade.profitLoss,
+          status: trade.status.toUpperCase() as 'SUCCESS' | 'FAILED' | 'PENDING',
+        }))
+
+        // Apply filters
+        let filteredTrades = mappedTrades
+        if (filter !== 'all') {
+          filteredTrades = mappedTrades.filter((t: Trade) =>
+            filter === 'dex' ? t.chain === 'BNB' : t.chain === 'POLYGON'
+          )
+        }
+
+        // Apply sorting
+        if (sortBy === 'profit' && filteredTrades.length > 0) {
+          filteredTrades.sort((a: Trade, b: Trade) => (b.profit || 0) - (a.profit || 0))
+        } else if (sortBy === 'volume' && filteredTrades.length > 0) {
+          filteredTrades.sort((a: Trade, b: Trade) => parseFloat(b.amountIn) - parseFloat(a.amountIn))
+        }
+
+        setTrades(filteredTrades)
       }
     } catch (error) {
       console.error('Failed to fetch trades:', error)
+      setTrades([])
     } finally {
       setLoading(false)
     }

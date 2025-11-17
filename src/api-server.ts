@@ -69,7 +69,7 @@ app.post(
   handleValidationErrors,
   async (req: Request, res: Response) => {
     try {
-      const { tokens, risk } = req.body;
+      const { tokens, risk, botType = 'all', maxTradeAmount } = req.body;
 
       // Filter out empty token addresses
       const validTokens = tokens.filter((t: string) => t && t.trim() !== '');
@@ -83,13 +83,14 @@ app.post(
       BotState.start({
         tokens: validTokens,
         riskLevel: risk,
-        maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
+        maxTradeAmount: maxTradeAmount || CONFIG.MAX_TRADE_AMOUNT_BNB,
         stopLoss: CONFIG.STOP_LOSS_PERCENTAGE,
         interval: CONFIG.BOT_LOOP_INTERVAL_MS,
         network: CONFIG.NETWORK as 'testnet' | 'mainnet',
       });
 
       logger.info(`✅ Bot started via API`, {
+        botType,
         tokenCount: validTokens.length,
         risk,
         network: CONFIG.NETWORK,
@@ -97,12 +98,13 @@ app.post(
 
       res.json({
         status: 'started',
-        message: 'Bot is now running',
+        message: `${botType === 'all' ? 'Trading bot' : botType.toUpperCase() + ' bot'} is now running`,
         config: {
+          botType,
           tokens: validTokens,
           riskLevel: risk,
           interval: CONFIG.BOT_LOOP_INTERVAL_MS,
-          maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
+          maxTradeAmount: maxTradeAmount || CONFIG.MAX_TRADE_AMOUNT_BNB,
           stopLoss: CONFIG.STOP_LOSS_PERCENTAGE,
           network: CONFIG.NETWORK,
         },
@@ -119,21 +121,23 @@ app.post(
 
 /**
  * POST /api/stop-bot
- * Stop the trading bot
+ * Stop the trading bot (supports botType: 'dex' | 'polymarket' | 'all')
  * Protected with: rate limiting
  */
 app.post('/api/stop-bot', botControlLimiter, async (req: Request, res: Response) => {
   try {
+    const { botType = 'all' } = req.body;
+
     if (!BotState.isRunning()) {
       return res.status(400).json({ error: 'Bot is not running' });
     }
 
     BotState.stop();
-    logger.info('🛑 Bot stopped via API');
+    logger.info(`🛑 Bot stopped via API (type: ${botType})`);
 
     res.json({
       status: 'stopped',
-      message: 'Bot has been stopped',
+      message: `${botType === 'all' ? 'All bots have' : botType.toUpperCase() + ' bot has'} been stopped`,
     });
   } catch (error) {
     logger.error(`API /stop-bot error: ${(error as Error).message}`);
@@ -491,6 +495,77 @@ app.post('/api/positions/:id/close', botControlLimiter, async (req: Request, res
 });
 
 /**
+ * GET /api/wallet/balance
+ * Get wallet balance across all chains
+ * Protected with: read rate limiting
+ */
+app.get('/api/wallet/balance', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { MultiChainWalletManager } = await import('./blockchain/multiChainWalletManager');
+    const walletManager = new MultiChainWalletManager();
+
+    // Get all balances
+    const balances = await walletManager.getAllBalances();
+
+    // Get primary BNB balance
+    const bnbBalance = balances.find(b => b.chain === 'BSC');
+
+    res.json({
+      balance: bnbBalance?.balance.toFixed(4) || '0.0000',
+      usdValue: ((bnbBalance?.balance || 0) * 600).toFixed(2), // Approximate BNB price
+      network: CONFIG.NETWORK,
+      address: walletManager.getAddress(),
+      allChains: balances,
+    });
+  } catch (error) {
+    logger.error(`API /wallet/balance error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/token/:address
+ * Get token data for a specific address
+ * Protected with: read rate limiting
+ */
+app.get('/api/token/:address', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { address } = req.params;
+
+    // Validate address format
+    if (!address || !address.match(/^0x[a-fA-F0-9]{40}$/)) {
+      return res.status(400).json({ error: 'Invalid token address' });
+    }
+
+    // Fetch token data from DexScreener or use multicall
+    const { multicall } = await import('./utils/multicall');
+    const tokenMetadata = await multicall.getTokenMetadata([address]);
+
+    if (!tokenMetadata[0] || !tokenMetadata[0].success) {
+      return res.status(404).json({ error: 'Token not found or invalid' });
+    }
+
+    const token = tokenMetadata[0];
+
+    // TODO: Get price data from DexScreener
+    res.json({
+      address,
+      symbol: token.symbol || 'UNKNOWN',
+      name: token.name || 'Unknown Token',
+      decimals: token.decimals || 18,
+      price: 0, // Placeholder - integrate with price oracle
+      priceChange24h: 0,
+      volume24h: 0,
+      liquidity: 0,
+      marketCap: 0,
+    });
+  } catch (error) {
+    logger.error(`API /token/:address error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * Health check
  * Protected with: health check rate limiting
  */
@@ -520,6 +595,8 @@ export function startAPIServer() {
     logger.info(`   GET  /api/analytics`);
     logger.info(`   GET  /api/positions`);
     logger.info(`   POST /api/positions/:id/close`);
+    logger.info(`   GET  /api/wallet/balance`);
+    logger.info(`   GET  /api/token/:address`);
     logger.info(`   GET  /health`);
   });
 }
