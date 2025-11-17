@@ -18,6 +18,7 @@ import { ImmortalAIAgent } from './ai/immortalAgent';
 import { saveConfig, loadConfig, appendToConfig, getConfigOrDefault } from './utils/configStorage';
 import { WebSocketManager } from './services/webSocketManager';
 import { PolymarketAgentOrchestrator } from './services/polymarketAgentOrchestrator';
+import { polymarketService } from './services/polymarketService';
 
 // Import middleware
 import {
@@ -1175,6 +1176,338 @@ app.post('/api/settings', botControlLimiter, async (req: Request, res: Response)
 });
 
 /**
+ * GET /api/polymarket/markets
+ * Get trending Polymarket prediction markets from Gamma API
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/markets', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10;
+    const category = req.query.category as string;
+    const search = req.query.search as string;
+
+    let markets;
+
+    if (search) {
+      markets = await polymarketService.searchMarkets(search, limit);
+    } else if (category) {
+      markets = await polymarketService.getMarketsByCategory(category, limit);
+    } else {
+      markets = await polymarketService.getMarkets(limit);
+    }
+
+    res.json({ markets, total: markets.length });
+  } catch (error) {
+    logger.error(`API /polymarket/markets error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/balance
+ * Get Polymarket wallet USDC balance on Polygon
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/balance', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const walletAddress = req.query.address as string;
+    const balance = await polymarketService.getBalance(walletAddress);
+    res.json(balance);
+  } catch (error) {
+    logger.error(`API /polymarket/balance error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/positions
+ * Get active Polymarket positions
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Response) => {
+  try {
+    // Get positions from Polymarket agent orchestrator if available
+    const agentTrades = polymarketOrchestrator.getTrades(100);
+
+    // Group by market to calculate positions
+    const positionMap = new Map<string, any>();
+
+    agentTrades.forEach(trade => {
+      if (!positionMap.has(trade.market)) {
+        positionMap.set(trade.market, {
+          marketId: trade.market.replace(/\s+/g, '_').toLowerCase(),
+          market: trade.market,
+          side: trade.action,
+          shares: 0,
+          avgPrice: 0,
+          currentPrice: 0.5,
+          pnl: 0,
+          roi: 0,
+        });
+      }
+
+      const position = positionMap.get(trade.market)!;
+      if (trade.action === 'buy') {
+        position.shares += trade.amount;
+      } else {
+        position.shares -= trade.amount;
+      }
+      position.pnl += trade.profitLoss;
+    });
+
+    const positions = Array.from(positionMap.values()).filter(p => p.shares > 0);
+
+    res.json({ positions, total: positions.length });
+  } catch (error) {
+    logger.error(`API /polymarket/positions error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/orders
+ * Get active Polymarket CLOB orders (requires wallet authentication)
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/orders', readLimiter, async (req: Request, res: Response) => {
+  try {
+    // Getting personal orders requires authenticated CLOB API access
+    // This would need the Python Polymarket client with wallet signature
+    // TODO: Integrate with Python polymarket.py client for authenticated CLOB access
+
+    const walletAddress = process.env.POLYGON_WALLET_ADDRESS;
+
+    if (!walletAddress) {
+      return res.json({
+        orders: [],
+        total: 0,
+        note: 'Wallet not configured. Set POLYGON_WALLET_ADDRESS to view orders.'
+      });
+    }
+
+    // For now, return empty as CLOB queries require authentication
+    res.json({
+      orders: [],
+      total: 0,
+      note: 'CLOB order fetching requires authenticated API access with wallet signature'
+    });
+  } catch (error) {
+    logger.error(`API /polymarket/orders error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/opportunities
+ * Get cross-platform arbitrage opportunities
+ * (Requires integration with other prediction markets like Kalshi, PredictIt, etc.)
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/opportunities', readLimiter, async (req: Request, res: Response) => {
+  try {
+    // Cross-platform arbitrage requires comparing odds across multiple platforms
+    // TODO: Integrate with Kalshi, PredictIt, Augur, etc.
+    // For now, identify markets with unusual odds that might indicate opportunities
+    const markets = await polymarketService.getMarkets(50);
+
+    const opportunities = markets
+      .filter(m => {
+        // Look for markets with extreme odds (potential value)
+        const yesPrice = m.yesPrice;
+        const noPrice = m.noPrice;
+        const hasValue = (yesPrice < 0.2 || yesPrice > 0.8) && m.volume24h > 50000;
+        return hasValue;
+      })
+      .map(m => ({
+        platform: 'Polymarket',
+        marketId: m.id,
+        market: m.question,
+        yesPrice: m.yesPrice,
+        noPrice: m.noPrice,
+        volume24h: m.volume24h,
+        liquidity: m.liquidity,
+        opportunity: m.yesPrice < 0.2 ? 'Undervalued YES' : 'Undervalued NO',
+        potentialProfit: Math.abs(m.yesPrice - 0.5) * 100, // Simplified
+      }))
+      .slice(0, 10);
+
+    res.json({
+      opportunities,
+      total: opportunities.length,
+      note: 'Cross-platform arbitrage requires integration with other prediction markets'
+    });
+  } catch (error) {
+    logger.error(`API /polymarket/opportunities error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/polymarket/analyze
+ * Analyze a Polymarket market with AI using Python agents (RAG/LLM)
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/polymarket/analyze', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { marketId, question } = req.body;
+
+    if (!question) {
+      return res.status(400).json({ error: 'Market question is required' });
+    }
+
+    logger.info(`🔍 Analyzing Polymarket market: ${question}`);
+
+    // Get market data from Polymarket first
+    let marketData = null;
+    if (marketId) {
+      marketData = await polymarketService.getMarket(marketId);
+    }
+
+    // TODO: Call Python agent's RAG/LLM system for real analysis
+    // For now, provide analysis based on market data
+    const yesPrice = marketData?.yesPrice || 0.5;
+    const volume = marketData?.volume24h || 0;
+    const liquidity = marketData?.liquidity || 0;
+
+    // Simple heuristic-based recommendation until Python RAG is integrated
+    let recommendation = 'HOLD';
+    if (yesPrice < 0.4 && volume > 100000) recommendation = 'BUY';
+    else if (yesPrice < 0.3 && volume > 50000) recommendation = 'STRONG_BUY';
+    else if (yesPrice > 0.7 && volume > 100000) recommendation = 'SELL';
+    else if (yesPrice > 0.8) recommendation = 'STRONG_SELL';
+
+    const confidence = liquidity > 100000 ? 0.8 : liquidity > 50000 ? 0.7 : 0.6;
+    const riskLevel = liquidity > 200000 ? 'LOW' : liquidity > 100000 ? 'MEDIUM' : 'HIGH';
+
+    const analysis = {
+      recommendation,
+      confidence,
+      reasoning: `Market analysis for "${question}": Current Yes price is ${(yesPrice * 100).toFixed(1)}% with $${volume.toLocaleString()} 24h volume. ${
+        liquidity > 100000 ? 'High liquidity provides good trading conditions.' : 'Lower liquidity increases risk.'
+      }`,
+      riskLevel,
+      suggestedAmount: liquidity > 100000 ? 100 : 50,
+      keyFactors: [
+        `24h Volume: $${volume.toLocaleString()}`,
+        `Liquidity: $${liquidity.toLocaleString()}`,
+        `Current Yes Price: ${(yesPrice * 100).toFixed(1)}%`,
+        marketData?.category ? `Category: ${marketData.category}` : 'Market active',
+      ],
+      timestamp: Date.now(),
+      marketData,
+    };
+
+    res.json({ success: true, analysis });
+  } catch (error) {
+    logger.error(`API /polymarket/analyze error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/history
+ * Get Polymarket betting history
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/history', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    // Get trades from orchestrator
+    const trades = polymarketOrchestrator.getTrades(limit);
+
+    const history = trades.map(trade => ({
+      id: trade.id,
+      timestamp: trade.timestamp,
+      market: trade.market,
+      side: trade.action,
+      amount: trade.amount,
+      price: 0.5, // Would come from actual trade data
+      outcome: trade.profitLoss > 0 ? 'win' : trade.profitLoss < 0 ? 'loss' : 'pending',
+      pnl: trade.profitLoss,
+      txHash: trade.transactionHash,
+    }));
+
+    res.json({ history, total: history.length });
+  } catch (error) {
+    logger.error(`API /polymarket/history error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/stats
+ * Get Polymarket betting statistics
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/stats', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const trades = polymarketOrchestrator.getTrades(1000);
+
+    const winningTrades = trades.filter(t => t.profitLoss > 0);
+    const losingTrades = trades.filter(t => t.profitLoss < 0);
+    const totalPnL = trades.reduce((sum, t) => sum + t.profitLoss, 0);
+
+    const stats = {
+      totalBets: trades.length,
+      winningBets: winningTrades.length,
+      losingBets: losingTrades.length,
+      winRate: trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0,
+      totalProfit: totalPnL,
+      avgBetSize: trades.length > 0 ? trades.reduce((sum, t) => sum + t.amount, 0) / trades.length : 0,
+      bestBet: trades.length > 0 ? Math.max(...trades.map(t => t.profitLoss)) : 0,
+      worstBet: trades.length > 0 ? Math.min(...trades.map(t => t.profitLoss)) : 0,
+    };
+
+    res.json(stats);
+  } catch (error) {
+    logger.error(`API /polymarket/stats error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/polymarket/leaderboard
+ * Get platform leaderboard (Note: Polymarket doesn't provide public leaderboard API)
+ * This returns our own bot's performance stats
+ * Protected with: read rate limiting
+ */
+app.get('/api/polymarket/leaderboard', readLimiter, async (req: Request, res: Response) => {
+  try {
+    // Polymarket doesn't provide a public leaderboard API
+    // So we return stats from our own agent trades
+    const trades = polymarketOrchestrator.getTrades(1000);
+
+    const winningTrades = trades.filter(t => t.profitLoss > 0);
+    const totalPnL = trades.reduce((sum, t) => sum + t.profitLoss, 0);
+    const totalVolume = trades.reduce((sum, t) => sum + t.amount, 0);
+    const winRate = trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0;
+
+    // Count unique markets traded
+    const uniqueMarkets = new Set(trades.map(t => t.market)).size;
+
+    const ourStats = {
+      rank: 1,
+      address: process.env.POLYGON_WALLET_ADDRESS || 'Bot Address',
+      displayName: 'Immortal AI Bot',
+      totalVolume,
+      totalProfit: totalPnL,
+      winRate,
+      marketsTraded: uniqueMarkets,
+    };
+
+    res.json({
+      topTraders: [ourStats],
+      userRank: 1,
+      note: 'Polymarket does not provide a public leaderboard API. Showing bot performance only.',
+    });
+  } catch (error) {
+    logger.error(`API /polymarket/leaderboard error: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * POST /api/polymarket-agent/start
  * Start the Polymarket autonomous trading agent
  * Protected with: bot control rate limiting
@@ -1337,7 +1670,7 @@ export function startAPIServer() {
     logger.info(`🌐 API Server running on http://localhost:${PORT}`);
     logger.info(`📊 Dashboard: Connect frontend to this server`);
     logger.info(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
-    logger.info(`📝 Available endpoints (${30} total):`);
+    logger.info(`📝 Available endpoints (${39} total):`);
     logger.info(`   POST /api/start-bot`);
     logger.info(`   POST /api/stop-bot`);
     logger.info(`   GET  /api/bot-status`);
@@ -1362,6 +1695,15 @@ export function startAPIServer() {
     logger.info(`   POST /api/telegram/send`);
     logger.info(`   GET  /api/settings`);
     logger.info(`   POST /api/settings`);
+    logger.info(`   GET  /api/polymarket/markets`);
+    logger.info(`   GET  /api/polymarket/balance`);
+    logger.info(`   GET  /api/polymarket/positions`);
+    logger.info(`   GET  /api/polymarket/orders`);
+    logger.info(`   GET  /api/polymarket/opportunities`);
+    logger.info(`   POST /api/polymarket/analyze`);
+    logger.info(`   GET  /api/polymarket/history`);
+    logger.info(`   GET  /api/polymarket/stats`);
+    logger.info(`   GET  /api/polymarket/leaderboard`);
     logger.info(`   POST /api/polymarket-agent/start`);
     logger.info(`   POST /api/polymarket-agent/stop`);
     logger.info(`   GET  /api/polymarket-agent/status`);

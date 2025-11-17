@@ -462,3 +462,159 @@ export async function discoverTokens(): Promise<TokenInfo[]> {
   // Mock implementation for now - needs backend endpoint
   return [];
 }
+
+// ===========================
+// Polymarket API Functions
+// ===========================
+
+export interface PolymarketMarket {
+  id: string;
+  question: string;
+  category: string;
+  volume24h: number;
+  liquidity: number;
+  yesPrice: number;
+  noPrice: number;
+  endDate: number;
+  active: boolean;
+  outcomes?: string[];
+  outcomePrices?: number[];
+  tags?: string[];
+  description?: string;
+  image?: string;
+}
+
+export interface PolymarketBalance {
+  usdc: number;
+  usdcLocked: number;
+  totalValue: number;
+  address: string;
+}
+
+export interface PolymarketPosition {
+  marketId: string;
+  market: string;
+  side: 'yes' | 'no';
+  shares: number;
+  avgPrice: number;
+  currentPrice: number;
+  pnl: number;
+  roi: number;
+}
+
+export interface PolymarketOrder {
+  id: string;
+  marketId: string;
+  market: string;
+  side: 'yes' | 'no';
+  price: number;
+  size: number;
+  status: 'open' | 'filled' | 'cancelled';
+  timestamp: number;
+}
+
+export interface CrossPlatformOpportunity {
+  platform: string;
+  marketId: string;
+  market: string;
+  yesPrice: number;
+  noPrice: number;
+  volume24h: number;
+  liquidity: number;
+  opportunity: string;
+  potentialProfit: number;
+}
+
+export interface AIMarketAnalysis {
+  recommendation: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+  confidence: number;
+  reasoning: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  suggestedAmount: number;
+  keyFactors: string[];
+  timestamp: number;
+  marketData?: PolymarketMarket;
+}
+
+export interface PolymarketBet {
+  id: string;
+  timestamp: number;
+  market: string;
+  side: 'yes' | 'no';
+  amount: number;
+  price: number;
+  outcome: 'win' | 'loss' | 'pending';
+  pnl: number;
+  txHash?: string;
+}
+
+export interface BettingStats {
+  totalBets: number;
+  winningBets: number;
+  losingBets: number;
+  winRate: number;
+  totalProfit: number;
+  avgBetSize: number;
+  bestBet: number;
+  worstBet: number;
+}
+
+export interface TopTrader {
+  rank: number;
+  address: string;
+  displayName: string;
+  totalVolume: number;
+  totalProfit: number;
+  winRate: number;
+  marketsTraded: number;
+}
+
+export interface Leaderboard {
+  topTraders: TopTrader[];
+  userRank: number | null;
+  note?: string;
+}
+
+export async function getPolymarketMarkets(limit: number = 10): Promise<PolymarketMarket[]> {
+  const response = await apiClient.request<{ markets: PolymarketMarket[] }>(`/api/polymarket/markets?limit=${limit}`);
+  return response.markets;
+}
+
+export async function getPolymarketBalance(): Promise<PolymarketBalance> {
+  return apiClient.request<PolymarketBalance>('/api/polymarket/balance');
+}
+
+export async function getPolymarketPositions(): Promise<PolymarketPosition[]> {
+  const response = await apiClient.request<{ positions: PolymarketPosition[] }>('/api/polymarket/positions');
+  return response.positions;
+}
+
+export async function getPolymarketOrders(): Promise<PolymarketOrder[]> {
+  const response = await apiClient.request<{ orders: PolymarketOrder[] }>('/api/polymarket/orders');
+  return response.orders;
+}
+
+export async function getCrossPlatformOpportunities(): Promise<CrossPlatformOpportunity[]> {
+  const response = await apiClient.request<{ opportunities: CrossPlatformOpportunity[] }>('/api/polymarket/opportunities');
+  return response.opportunities;
+}
+
+export async function analyzePolymarketMarket(marketId: string, question: string): Promise<{ success: boolean; analysis: AIMarketAnalysis }> {
+  return apiClient.request<{ success: boolean; analysis: AIMarketAnalysis }>('/api/polymarket/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ marketId, question }),
+  });
+}
+
+export async function getPolymarketHistory(limit: number = 20): Promise<PolymarketBet[]> {
+  const response = await apiClient.request<{ history: PolymarketBet[] }>(`/api/polymarket/history?limit=${limit}`);
+  return response.history;
+}
+
+export async function getPolymarketBettingStats(): Promise<BettingStats> {
+  return apiClient.request<BettingStats>('/api/polymarket/stats');
+}
+
+export async function getPolymarketLeaderboard(): Promise<Leaderboard> {
+  return apiClient.request<Leaderboard>('/api/polymarket/leaderboard');
+}
