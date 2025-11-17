@@ -39,14 +39,21 @@ export default function TradingStats() {
   const fetchStats = async () => {
     try {
       setError(null);
-      const response = await fetch('http://localhost:3001/api/stats');
+      // Use correct API client method
+      const data = await api.getPerformanceData();
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      setStats(data);
+      // Map backend data to component structure
+      setStats({
+        totalTrades: data.totalTrades,
+        completedTrades: data.wins + data.losses,
+        pendingTrades: 0,
+        profitableTrades: data.wins,
+        losingTrades: data.losses,
+        winRate: data.winRate,
+        totalProfitLoss: data.totalPL,
+        bestTrade: null, // TODO: Add to backend
+        worstTrade: null, // TODO: Add to backend
+      });
     } catch (err: any) {
       console.error('Failed to fetch stats:', err);
       setError(err.message || 'Failed to fetch stats');

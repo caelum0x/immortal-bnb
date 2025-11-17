@@ -35,8 +35,20 @@ export default function TradingHistory() {
 
   const fetchTrades = async () => {
     try {
-      const data = await api.getTradeHistory({ limit: 10 });
-      setTrades(data.trades || []);
+      const data = await api.getTradingHistory(10);
+      // Map backend data to component structure
+      const mappedTrades = (data.trades || []).map((trade: any) => ({
+        id: trade.id,
+        timestamp: trade.timestamp,
+        type: trade.action,
+        tokenIn: trade.action === 'buy' ? 'BNB' : trade.tokenSymbol,
+        tokenOut: trade.action === 'buy' ? trade.tokenSymbol : 'BNB',
+        amountIn: trade.amount,
+        amountOut: trade.amount * trade.price,
+        profitLoss: trade.profitLoss,
+        outcome: trade.status,
+      }));
+      setTrades(mappedTrades);
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch trades');
