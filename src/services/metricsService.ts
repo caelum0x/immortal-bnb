@@ -128,6 +128,38 @@ export const tradingVolumeTotal = new Counter({
 });
 
 // ============================================================================
+// ORDER METRICS
+// ============================================================================
+
+export const ordersCreated = new Counter({
+  name: 'orders_created_total',
+  help: 'Total number of orders created',
+  labelNames: ['type', 'side', 'status'],
+  registers: [register],
+});
+
+export const ordersExecuted = new Counter({
+  name: 'orders_executed_total',
+  help: 'Total number of orders executed',
+  labelNames: ['type', 'side'],
+  registers: [register],
+});
+
+export const ordersCancelled = new Counter({
+  name: 'orders_cancelled_total',
+  help: 'Total number of orders cancelled',
+  labelNames: ['type'],
+  registers: [register],
+});
+
+export const activeOrders = new Gauge({
+  name: 'active_orders',
+  help: 'Number of currently active orders',
+  labelNames: ['type'],
+  registers: [register],
+});
+
+// ============================================================================
 // POLYMARKET METRICS
 // ============================================================================
 
@@ -533,6 +565,20 @@ export class MetricsService {
 
   // Trading tracking
   trackTrade = trackTrade;
+
+  // Order tracking
+  trackOrder(type: string, side: string, status: string) {
+    ordersCreated.labels(type, side, status).inc();
+  }
+  trackOrderExecution(type: string, side: string) {
+    ordersExecuted.labels(type, side).inc();
+  }
+  trackOrderCancellation(type: string) {
+    ordersCancelled.labels(type).inc();
+  }
+  updateActiveOrders(type: string, count: number) {
+    activeOrders.labels(type).set(count);
+  }
 
   // Polymarket tracking
   trackPolymarketApi = trackPolymarketApi;

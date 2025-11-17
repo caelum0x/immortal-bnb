@@ -2200,6 +2200,240 @@ app.post('/api/arbitrage/simulate', readLimiter, async (req: Request, res: Respo
   }
 });
 
+// ============================================================================
+// ORDER MANAGEMENT ENDPOINTS
+// ============================================================================
+
+import { getOrderMonitoringService } from './services/orderMonitoringService';
+const orderMonitoring = getOrderMonitoringService();
+
+/**
+ * POST /api/orders/create
+ * Create a new order (market, limit, stop-loss, take-profit, trailing-stop)
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/orders/create', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const {
+      userId,
+      marketId,
+      marketQuestion,
+      tokenId,
+      outcome,
+      side,
+      type,
+      amount,
+      price,
+      stopLoss,
+      takeProfit,
+      trailingStop,
+    } = req.body;
+
+    // Validation
+    if (!userId || !marketId || !tokenId || !side || !type || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Create order in database
+    const order = await prisma.order.create({
+      data: {
+        userId,
+        marketId,
+        marketQuestion: marketQuestion || `Market ${marketId}`,
+        tokenId,
+        outcome: outcome || '',
+        side,
+        type,
+        amount: parseFloat(amount),
+        price: price ? parseFloat(price) : null,
+        filledAmount: 0,
+        remainingAmount: parseFloat(amount),
+        stopLoss: stopLoss ? parseFloat(stopLoss) : null,
+        takeProfit: takeProfit ? parseFloat(takeProfit) : null,
+        trailingStop: trailingStop ? parseFloat(trailingStop) : null,
+        status: type === 'MARKET' ? 'FILLED' : 'OPEN',
+      },
+    });
+
+    logger.info(`✅ Order created: ${order.id} (${type} ${side} ${amount})`);
+
+    // If market order, execute immediately
+    if (type === 'MARKET') {
+      // TODO: Execute market order immediately
+      logger.info(`🚀 Market order ${order.id} would execute immediately`);
+    }
+
+    res.json({
+      success: true,
+      order: {
+        id: order.id,
+        type: order.type,
+        side: order.side,
+        amount: order.amount,
+        price: order.price,
+        status: order.status,
+        createdAt: order.createdAt,
+      },
+    });
+
+    metricsService.trackOrder(order.type, order.side, order.status);
+
+  } catch (error) {
+    logger.error(`Failed to create order: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/orders
+ * Get user's orders with optional filters
+ * Protected with: read rate limiting
+ */
+app.get('/api/orders', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { userId, status, type, marketId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const where: any = { userId: userId as string };
+
+    if (status) where.status = status;
+    if (type) where.type = type;
+    if (marketId) where.marketId = marketId;
+
+    const orders = await prisma.order.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    res.json({
+      orders: orders.map(order => ({
+        id: order.id,
+        marketId: order.marketId,
+        marketQuestion: order.marketQuestion,
+        tokenId: order.tokenId,
+        outcome: order.outcome,
+        side: order.side,
+        type: order.type,
+        amount: order.amount,
+        price: order.price,
+        filledAmount: order.filledAmount,
+        remainingAmount: order.remainingAmount,
+        stopLoss: order.stopLoss,
+        takeProfit: order.takeProfit,
+        trailingStop: order.trailingStop,
+        status: order.status,
+        createdAt: order.createdAt,
+        executedAt: order.executedAt,
+        cancelledAt: order.cancelledAt,
+      })),
+      total: orders.length,
+    });
+
+  } catch (error) {
+    logger.error(`Failed to fetch orders: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/orders/:id
+ * Get specific order details
+ * Protected with: read rate limiting
+ */
+app.get('/api/orders/:id', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+    });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    res.json({ order });
+
+  } catch (error) {
+    logger.error(`Failed to fetch order: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/orders/:id/cancel
+ * Cancel an open order
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/orders/:id/cancel', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const success = await orderMonitoring.cancelOrder(id, userId);
+
+    if (!success) {
+      return res.status(400).json({ error: 'Failed to cancel order' });
+    }
+
+    res.json({ success: true, message: 'Order cancelled successfully' });
+
+  } catch (error) {
+    logger.error(`Failed to cancel order: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/orders/stats
+ * Get order statistics for a user
+ * Protected with: read rate limiting
+ */
+app.get('/api/orders/stats', readLimiter, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.query;
+
+    const stats = await orderMonitoring.getOrderStats(userId as string);
+
+    res.json(stats);
+
+  } catch (error) {
+    logger.error(`Failed to fetch order stats: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/orders/price-update
+ * Update current price for order monitoring (internal/admin use)
+ * Protected with: bot control rate limiting
+ */
+app.post('/api/orders/price-update', botControlLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tokenId, price } = req.body;
+
+    if (!tokenId || !price) {
+      return res.status(400).json({ error: 'tokenId and price are required' });
+    }
+
+    orderMonitoring.updatePrice(tokenId, parseFloat(price));
+
+    res.json({ success: true, message: 'Price updated' });
+
+  } catch (error) {
+    logger.error(`Failed to update price: ${(error as Error).message}`);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 /**
  * Health check
  * Protected with: health check rate limiting
@@ -2245,7 +2479,7 @@ export function startAPIServer() {
     logger.info(`🌐 API Server running on http://localhost:${PORT}`);
     logger.info(`📊 Dashboard: Connect frontend to this server`);
     logger.info(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
-    logger.info(`📝 Available endpoints (${51} total):`);
+    logger.info(`📝 Available endpoints (${57} total):`);
     logger.info(`   POST /api/start-bot`);
     logger.info(`   POST /api/stop-bot`);
     logger.info(`   GET  /api/bot-status`);
@@ -2295,8 +2529,18 @@ export function startAPIServer() {
     logger.info(`   POST /api/staking/withdraw`);
     logger.info(`   POST /api/staking/claim`);
     logger.info(`   POST /api/arbitrage/simulate`);
+    logger.info(`   POST /api/orders/create`);
+    logger.info(`   GET  /api/orders`);
+    logger.info(`   GET  /api/orders/:id`);
+    logger.info(`   POST /api/orders/:id/cancel`);
+    logger.info(`   GET  /api/orders/stats`);
+    logger.info(`   POST /api/orders/price-update`);
     logger.info(`   GET  /health`);
     logger.info(`   GET  /metrics`);
+
+    // Initialize order monitoring service
+    logger.info('🔍 Starting order monitoring service...');
+    orderMonitoring.start(5000); // Check every 5 seconds
   });
 
   return httpServer;
