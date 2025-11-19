@@ -6,6 +6,156 @@
 **Status:** Production-Ready Architecture
 
 ---
+1. Executive Summary
+The Immortal AI Trading Agent is a production-level, decentralized AI-driven bot for automated trading on BNB Chain (spot markets via PancakeSwap) and Polymarket (prediction markets on Polygon). It features "immortal" learning through persistent memory on BNB Greenfield, enabling the AI to evolve strategies based on past trades. The system is built as a mono-repo with Python microservices for Polymarket (agents for RAG/web search/AI decisions, clob-client for CLOB orders) and TypeScript backend/frontend for BNB integration and UI.
+This technical PRD outlines requirements for a secure, scalable product, emphasizing dynamic operations (e.g., token/market discovery via APIs, no hardcodes), non-custodial execution, and cross-chain capabilities. It builds on the Claude-generated code (commit history provided), ensuring production readiness with error-free integration, CI/CD, and monitoring.
+Key Differentiators: AI with RAG for real-time web search on Polymarket bets, optimized for opBNB speed (<1s tx), and unified UI for multi-chain control.
+2. Problem Statement and Use Cases
+Problem
+Crypto trading requires constant monitoring, with challenges like:
+
+Volatile token discovery on BNB (e.g., memes on PancakeSwap) and markets on Polymarket (e.g., event bets).
+Lack of persistent AI learning (bots forget past decisions).
+Fragmented multi-chain tools (BNB spot vs. Polygon predictions).
+Poor user interfaces for bot management, leading to errors or missed opportunities.
+
+Use Cases
+
+UC1: Automated BNB Spot Trading: User starts bot; AI discovers trending tokens via DexScreener, decides based on volume/liquidity (using PancakeSwap v3-sdk for impact checks), executes swaps.
+UC2: Polymarket Betting: AI uses RAG/web search (agents package) to analyze news for bets, decides probability, executes via clob-client.
+UC3: Learning & Monitoring: Post-trade, store memory on Greenfield; frontend displays real-time dashboards with past decisions.
+UC4: Cross-Chain Arb: Detect opportunities (e.g., BNB token linked to Polymarket event), bridge via Wormhole, execute.
+
+Target Metrics: 70%+ profitable trades in simulations, <200ms API latency, 99.9% uptime.
+3. Goals and Objectives
+Business Goals
+
+Deploy MVP in 3 weeks, achieve 500 users in Q1 2026 (tracked via wallet connects).
+Generate revenue via $IMMBOT token (staking fees).
+Position as leading AI bot for BNB/Polymarket.
+
+Technical Objectives
+
+Integrate mono-repo components for seamless multi-chain trading.
+Ensure 100% dynamic operations (e.g., discovery via APIs, decisions via computed thresholds).
+Achieve sub-second trades on opBNB.
+Implement AI accuracy >80% via Greenfield memory feedback.
+Production Security: OWASP compliance, audited contracts.
+
+Non-Functional Requirements
+
+Performance: Tx confirmation <1s (opBNB), API <500ms, bot loop 5min interval.
+Scalability: Handle 1,000 concurrent users (Express clustering, Redis cache).
+Security: Non-custodial (user signs via Wagmi), API auth (JWT), rate limiting.
+Reliability: 99.9% uptime (PM2/Docker), error logging (Sentry).
+Usability: Responsive UI (mobile/desktop), intuitive flows.
+
+4. Target Audience and Personas
+
+Audience: Crypto traders, AI developers, DeFi enthusiasts (18-45 yo, tech-savvy).
+Persona 1: Retail Trader (Screens: Mobile Dashboard): Wants quick setup; uses alerts for profits.
+Persona 2: Pro DeFi User (Screens: Analytics): Analyzes memory; customizes AI prompts.
+Persona 3: Developer (Screens: Settings/API Docs): Extends via open mono-repo.
+
+6. Features and Requirements
+Feature Breakdown
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+FeatureDescriptionPriorityRequirementsDynamic DiscoveryScan BNB tokens (DexScreener) and Polymarket markets (API/RAG)HighNo hardcodes; filter by volume > avg (computed from query results); integrate PancakeSwap token-lists for validation.AI Decision EngineLLM prompts with RAG/web search (agents package); learn from memoryHighOpenRouter integration; dynamic thresholds (e.g., profitability > 60% based on historical avg from Greenfield).Trade ExecutionBNB spot (v3-sdk/smart-router); Polymarket (clob-client CLOB orders)HighNon-custodial; dynamic paths (multicall for pools); opBNB for speed.Immortal MemoryStore/fetch decisions (Greenfield SDK)MediumJSON format; append to AI prompts for evolution; dynamic fetch last N (from config).Cross-Chain ArbBridge BNB-Polygon (Wormhole)LowTrigger if price diff > threshold (from price-api-sdk).Alerts & MonitoringTelegram notifications (Telegraf)MediumReal-time on trades; dynamic based on user chat ID.Frontend UIDashboard for control/monitoringHighWagmi for wallet; dynamic data from API.
+Detailed Requirements
+
+Discovery (Dynamic): Use DexScreener /search (query= 'meme', order= 'volumeh24 desc'); Polymarket API /markets (filter active). No lists—compute thresholds (e.g., liquidity > median from results).
+AI (Agents Package): RAG for web search (e.g., "search news for market X"); prompts like "Bet if sentiment > avg" (from pubchempy/biopyton if niche).
+Execution: PancakeSwap v3-sdk for paths (exactInputSingle); clob-client for orders (placeOrder with dynamic side/amount).
+Memory: Greenfield upload post-trade; fetch for AI (append "Past: [memory]").
+Frontend: Next.js pages with real data (API polling); screens as per section 6.
+
+6. User Flows, Pages, and Screens
+User Flows
+
+Flow 1: Onboarding (5 screens): Landing --> Wallet Connect (Wagmi) --> Config Setup --> Start Bot (API call) --> Dashboard (status).
+Flow 2: Trading Cycle (4 screens): Discovery (list from API) --> AI Decide (modal with rationale) --> Approve/Execute (sign tx) --> Post-Trade Alert (Telegram screen).
+Flow 3: Monitoring (3 screens): Dashboard (real-time polls) --> Memory Log (searchable) --> Settings (update config).
+
+Pages/Screens (Next.js in /frontend)
+
+Landing Page (pages/index.tsx): Hero, Connect Button (wagmi). Mobile Screen: Full-view hero; Desktop: Sidebar.
+Dashboard Page (pages/dashboard.tsx): Config Form (tokens input from discovery API), Start/Stop Buttons, Status Charts (real data polling). Mobile: Tabbed screens; Desktop: Multi-column.
+Discovery Screen (components/Discovery.tsx): Table of tokens/markets (DexScreener/Polymarket API). Mobile: Scrollable list; Desktop: Grid with filters.
+AI Decision Modal (components/AIDecisionModal.tsx): Prompt result, Approve Button (wagmi sign for tx). Mobile: Full-screen; Desktop: Popup.
+Trades History Screen (pages/trades.tsx): Log table (from API). Mobile: Accordion; Desktop: Detailed table.
+Memory Log Screen (pages/memory.tsx): Searchable list (from Greenfield via API). Mobile: Timeline; Desktop: Data grid.
+Settings Page (pages/settings.tsx): Form for risk/Telegram ID. Mobile: Stepper; Desktop: Form fields.
+Error Screens (global ErrorBoundary): "Low Liquidity" (from utils), "API Offline".
+
+7. Technical Specifications
+
+Backend (/src + /agents + /clob-client): TS/Bun for /src (Express API, Ethers.js), Python/FastAPI for agents/clob (subprocess or separate server).
+Frontend: Next.js, Wagmi for wallet, Axios for API.
+Packages: PancakeSwap (@pancakeswap/v3-sdk, smart-router, multicall, token-lists, chains, utils, wagmi); Polymarket (agents' Gamma/Polymarket.py, clob-client).
+Data Sources: DexScreener (BNB discovery), Polymarket API (markets), OpenRouter (AI).
+Storage: Greenfield (SDK for JSON uploads).
+Deployment: Vercel (frontend), Heroku (backend), Poetry for Python.
+Testing: 90% coverage (Jest TS, pytest Python).
+Security: JWT API auth, non-custodial tx, rate limiting.
+
+8. Risks and Mitigations
+
+Risk: API Rate Limits—Mitigation: Caching (Redis), dynamic backoff.
+Risk: Chain Fees—Mitigation: opBNB default, user-set thresholds.
+Risk: AI Inaccuracy—Mitigation: Backtesting, memory validation.
+Risk: Integration Latency—Mitigation: Async API calls.
 
 ## Executive Summary
 

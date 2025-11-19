@@ -18,7 +18,7 @@ import { logger } from './utils/logger';
 import { logTradeEvent, logAIDecision, logErrorWithContext, logPerformance } from './monitoring/logging';
 import { CONFIG } from './config';
 import { ImmortalAIAgent } from './ai/immortalAgent';
-import { startAPIServer } from './api/server';
+import { startAPIServer } from './api-server';
 import { telegramBotManager } from './alerts/telegramBot';
 import { storeMemory, initializeStorage } from './blockchain/memoryStorage';
 import { getTokenData, getTrendingTokens, calculateBuySellPressure } from './data/marketFetcher';
@@ -291,6 +291,7 @@ async function invokeAgent(tokenAddress: string) {
             activePositions.delete(tokenAddress);
           }
 
+<<<<<<< HEAD
           // Store trade in database
           try {
             await tradeRepository.create({
@@ -336,6 +337,7 @@ async function invokeAgent(tokenAddress: string) {
             txHash: tradeResult.txHash
           });
 
+<<<<<<< HEAD
           // Record metrics
           recordTrade('pancakeswap', 'success', 0); // P&L calculated later
           

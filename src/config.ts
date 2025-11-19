@@ -127,6 +127,7 @@ export const CONFIG = {
   STOP_LOSS_PERCENTAGE: parseFloat(process.env.STOP_LOSS_PERCENTAGE || '10'),
   MAX_SLIPPAGE_PERCENTAGE: parseFloat(process.env.MAX_SLIPPAGE_PERCENTAGE || '2'),
   BOT_LOOP_INTERVAL_MS: parseInt(process.env.BOT_LOOP_INTERVAL_MS || '300000'), // 5 minutes
+  MAX_CONCURRENT_POSITIONS: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '5'),
 
   // AI Trading Thresholds
   MIN_CONFIDENCE_THRESHOLD: parseFloat(process.env.MIN_CONFIDENCE_THRESHOLD || '0.7'),
@@ -149,6 +150,18 @@ export const CONFIG = {
   POLYMARKET_CHAIN_ID: parseInt(process.env.POLYMARKET_CHAIN_ID || '137'), // Polygon mainnet
   POLYGON_RPC: process.env.POLYGON_RPC || 'https://polygon-rpc.com',
   POLYGON_TESTNET_RPC: process.env.POLYGON_TESTNET_RPC || 'https://rpc-mumbai.maticvigil.com',
+
+  // Polymarket Wallet Configuration
+  POLYMARKET_WALLET_TYPE: (process.env.POLYMARKET_WALLET_TYPE || 'proxy') as 'proxy' | 'safe',
+
+  // Proxy Wallet (Magic/email-based)
+  POLYMARKET_EMAIL: process.env.POLYMARKET_EMAIL || '',
+  POLYMARKET_PROXY_PRIVATE_KEY: process.env.POLYMARKET_PROXY_PRIVATE_KEY || process.env.WALLET_PRIVATE_KEY || '',
+  POLYMARKET_PROXY_ADDRESS: process.env.POLYMARKET_PROXY_ADDRESS || '',
+
+  // Safe Wallet (Browser wallet)
+  POLYMARKET_SAFE_ADDRESS: process.env.POLYMARKET_SAFE_ADDRESS || '',
+  POLYMARKET_SAFE_PRIVATE_KEY: process.env.POLYMARKET_SAFE_PRIVATE_KEY || process.env.WALLET_PRIVATE_KEY || '',
 
   // API Server
   API_PORT: parseInt(process.env.API_PORT || '3001'),

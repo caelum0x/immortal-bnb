@@ -80,15 +80,27 @@ class APIClient {
     return { error: 'Backend not configured', needsSetup: true };
   }
 
-  // Bot Status API - Updated to match backend endpoints
+  // Bot Status API - Fixed to match backend endpoint
   async getBotStatus() {
     return this.request<{
-      status: 'running' | 'stopped' | 'error' | 'demo';
-      message: string;
-      walletConnected?: boolean;
-      aiEnabled?: boolean;
-      needsSetup?: boolean;
-    }>('/api/status');
+      running: boolean;
+      watchlist: string[];
+      riskLevel: number;
+      config: {
+        maxTradeAmount: number;
+        stopLoss: number;
+        network: string;
+        interval: number;
+      };
+      dex?: {
+        status: string;
+        lastTrade?: string;
+      };
+      polymarket?: {
+        status: string;
+        lastTrade?: string;
+      };
+    }>('/api/bot-status');
   }
 
   // Wallet API - Updated to match backend
@@ -101,44 +113,66 @@ class APIClient {
     }>('/api/wallet/balance');
   }
 
-  // Trading History API - Updated to match backend
+  // Trading History API - Fixed to match backend endpoint
   async getTradingHistory(limit = 20) {
     return this.request<{
       trades: Array<{
         id: string;
-        timestamp: string;
-        pair: string;
-        type: 'buy' | 'sell';
-        amount: string;
-        price: string;
-        status: 'completed' | 'pending' | 'failed';
-        pnl?: string;
+        timestamp: number;
+        token: string;
+        tokenSymbol: string;
+        action: 'buy' | 'sell';
+        amount: number;
+        price: number;
+        status: 'pending' | 'success' | 'failed';
         txHash?: string;
+        error?: string;
+        profitLoss?: number;
       }>;
       total: number;
-    }>(`/api/trades?limit=${limit}`);
+    }>(`/api/trade-logs?limit=${limit}`);
   }
 
-  // Performance API - Updated to match backend stats endpoint
+  // Performance API - Fixed to match backend endpoint
   async getPerformanceData() {
     return this.request<{
       totalTrades: number;
-      successRate: number;
-      totalProfit: string;
-      needsConfiguration?: boolean;
-    }>('/api/stats');
+      wins: number;
+      losses: number;
+      winRate: number;
+      totalPL: number;
+      avgPL: number;
+    }>('/api/trading-stats');
   }
 
-  // Bot Control API (for future implementation)
-  async startBot() {
-    return this.request<{ success: boolean; message: string }>('/api/bot/start', {
+  // Bot Control API - Fixed to match backend endpoints
+  async startBot(type: 'dex' | 'polymarket' | 'all' = 'all', config?: {
+    tokens?: string[];
+    risk?: number;
+    maxTradeAmount?: number;
+  }) {
+    return this.request<{
+      status: string;
+      message: string;
+      config?: any;
+    }>('/api/start-bot', {
       method: 'POST',
+      body: JSON.stringify({
+        tokens: config?.tokens || [],
+        risk: config?.risk || 5,
+        maxTradeAmount: config?.maxTradeAmount,
+        botType: type,
+      }),
     });
   }
 
-  async stopBot() {
-    return this.request<{ success: boolean; message: string }>('/api/bot/stop', {
+  async stopBot(type: 'dex' | 'polymarket' | 'all' = 'all') {
+    return this.request<{
+      status: string;
+      message: string;
+    }>('/api/stop-bot', {
       method: 'POST',
+      body: JSON.stringify({ botType: type }),
     });
   }
 
@@ -148,22 +182,98 @@ class APIClient {
     return this.getWalletBalance();
   }
 
-  // Dashboard Stats API
+  // Dashboard Stats API - Uses trading-stats endpoint
   async getDashboardStats() {
+    // Use trading-stats endpoint since dashboard/stats doesn't exist
     return this.request<{
-      totalProfit: string;
-      profitChange: string;
       totalTrades: number;
-      successRate: number;
-      activePositions: number;
-      daysProfitable: number;
-      aiStatus: {
-        isLearning: boolean;
-        confidence: number;
-        memoryCount: number;
-        lastUpdate: string;
+      wins: number;
+      losses: number;
+      winRate: number;
+      totalPL: number;
+      avgPL: number;
+    }>('/api/trading-stats');
+  }
+
+  // Analytics API (comprehensive performance metrics)
+  async getAnalytics(timeframe: string = '30d') {
+    return this.request<{
+      profitTimeline: Array<{
+        date: string;
+        profit: number;
+        cumulativeProfit: number;
+      }>;
+      tradeDistribution: {
+        successful: number;
+        failed: number;
+        pending: number;
       };
-    }>('/api/dashboard/stats');
+      topTokens: Array<{
+        symbol: string;
+        trades: number;
+        totalProfit: number;
+      }>;
+      performanceMetrics: {
+        totalReturn: number;
+        sharpeRatio: number;
+        maxDrawdown: number;
+        winRate: number;
+        avgWin: number;
+        avgLoss: number;
+        profitFactor: number;
+      };
+    }>(`/api/analytics?timeframe=${timeframe}`);
+  }
+
+  // Positions API
+  async getPositions() {
+    return this.request<{
+      positions: Array<{
+        id: string;
+        tokenSymbol: string;
+        tokenAddress: string;
+        entryPrice: number;
+        currentPrice: number;
+        amount: number;
+        value: number;
+        pnl: number;
+        pnlPercent: number;
+        entryTime: number;
+        status: 'active' | 'pending' | 'closed';
+      }>;
+      total: number;
+      totalValue: number;
+      totalPnL: number;
+    }>('/api/positions');
+  }
+
+  async closePosition(positionId: string) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      positionId: string;
+      trade?: any;
+    }>(`/api/positions/${positionId}/close`, {
+      method: 'POST',
+    });
+  }
+
+  // Token Discovery API
+  async discoverTokens(limit: number = 10) {
+    return this.request<{
+      tokens: Array<{
+        address: string;
+        symbol: string;
+        name: string;
+        priceUsd: number;
+        priceChange24h: number;
+        volume24h: number;
+        liquidity: number;
+        marketCap?: number;
+        score?: number;
+      }>;
+      total: number;
+    }>(`/api/discover-tokens?limit=${limit}`);
   }
 
   // Memory API
@@ -213,11 +323,13 @@ export const apiClient = new APIClient(API_BASE_URL);
 export const api = {
   // Bot operations
   getBotStatus: () => apiClient.getBotStatus(),
-  startBot: () => apiClient.startBot(),
-  stopBot: () => apiClient.stopBot(),
+  startBot: (type?: 'dex' | 'polymarket' | 'all', config?: { tokens?: string[]; risk?: number; maxTradeAmount?: number }) =>
+    apiClient.startBot(type, config),
+  stopBot: (type?: 'dex' | 'polymarket' | 'all') => apiClient.stopBot(type),
 
   // Wallet operations
-  getWalletInfo: (address: string) => apiClient.getWalletInfo(address),
+  getWalletBalance: () => apiClient.getWalletBalance(),
+  getWalletInfo: (address?: string) => apiClient.getWalletInfo(address),
 
   // Trading operations
   getTradingHistory: (limit?: number) => apiClient.getTradingHistory(limit),
@@ -227,8 +339,16 @@ export const api = {
   getDashboardStats: () => apiClient.getDashboardStats(),
   getMemories: (limit?: number) => apiClient.getMemories(limit),
 
+  // Analytics operations
+  getAnalytics: (timeframe?: string) => apiClient.getAnalytics(timeframe),
+
+  // Positions operations
+  getPositions: () => apiClient.getPositions(),
+  closePosition: (positionId: string) => apiClient.closePosition(positionId),
+
   // Token operations
   getTokenData: (address: string) => apiClient.getTokenData(address),
+  discoverTokens: (limit?: number) => apiClient.discoverTokens(limit),
 
   // Health check
   getHealth: () => apiClient.getHealth(),
@@ -341,4 +461,160 @@ export async function getTradingStats(): Promise<TradingStats> {
 export async function discoverTokens(): Promise<TokenInfo[]> {
   // Mock implementation for now - needs backend endpoint
   return [];
+}
+
+// ===========================
+// Polymarket API Functions
+// ===========================
+
+export interface PolymarketMarket {
+  id: string;
+  question: string;
+  category: string;
+  volume24h: number;
+  liquidity: number;
+  yesPrice: number;
+  noPrice: number;
+  endDate: number;
+  active: boolean;
+  outcomes?: string[];
+  outcomePrices?: number[];
+  tags?: string[];
+  description?: string;
+  image?: string;
+}
+
+export interface PolymarketBalance {
+  usdc: number;
+  usdcLocked: number;
+  totalValue: number;
+  address: string;
+}
+
+export interface PolymarketPosition {
+  marketId: string;
+  market: string;
+  side: 'yes' | 'no';
+  shares: number;
+  avgPrice: number;
+  currentPrice: number;
+  pnl: number;
+  roi: number;
+}
+
+export interface PolymarketOrder {
+  id: string;
+  marketId: string;
+  market: string;
+  side: 'yes' | 'no';
+  price: number;
+  size: number;
+  status: 'open' | 'filled' | 'cancelled';
+  timestamp: number;
+}
+
+export interface CrossPlatformOpportunity {
+  platform: string;
+  marketId: string;
+  market: string;
+  yesPrice: number;
+  noPrice: number;
+  volume24h: number;
+  liquidity: number;
+  opportunity: string;
+  potentialProfit: number;
+}
+
+export interface AIMarketAnalysis {
+  recommendation: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+  confidence: number;
+  reasoning: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  suggestedAmount: number;
+  keyFactors: string[];
+  timestamp: number;
+  marketData?: PolymarketMarket;
+}
+
+export interface PolymarketBet {
+  id: string;
+  timestamp: number;
+  market: string;
+  side: 'yes' | 'no';
+  amount: number;
+  price: number;
+  outcome: 'win' | 'loss' | 'pending';
+  pnl: number;
+  txHash?: string;
+}
+
+export interface BettingStats {
+  totalBets: number;
+  winningBets: number;
+  losingBets: number;
+  winRate: number;
+  totalProfit: number;
+  avgBetSize: number;
+  bestBet: number;
+  worstBet: number;
+}
+
+export interface TopTrader {
+  rank: number;
+  address: string;
+  displayName: string;
+  totalVolume: number;
+  totalProfit: number;
+  winRate: number;
+  marketsTraded: number;
+}
+
+export interface Leaderboard {
+  topTraders: TopTrader[];
+  userRank: number | null;
+  note?: string;
+}
+
+export async function getPolymarketMarkets(limit: number = 10): Promise<PolymarketMarket[]> {
+  const response = await apiClient.request<{ markets: PolymarketMarket[] }>(`/api/polymarket/markets?limit=${limit}`);
+  return response.markets;
+}
+
+export async function getPolymarketBalance(): Promise<PolymarketBalance> {
+  return apiClient.request<PolymarketBalance>('/api/polymarket/balance');
+}
+
+export async function getPolymarketPositions(): Promise<PolymarketPosition[]> {
+  const response = await apiClient.request<{ positions: PolymarketPosition[] }>('/api/polymarket/positions');
+  return response.positions;
+}
+
+export async function getPolymarketOrders(): Promise<PolymarketOrder[]> {
+  const response = await apiClient.request<{ orders: PolymarketOrder[] }>('/api/polymarket/orders');
+  return response.orders;
+}
+
+export async function getCrossPlatformOpportunities(): Promise<CrossPlatformOpportunity[]> {
+  const response = await apiClient.request<{ opportunities: CrossPlatformOpportunity[] }>('/api/polymarket/opportunities');
+  return response.opportunities;
+}
+
+export async function analyzePolymarketMarket(marketId: string, question: string): Promise<{ success: boolean; analysis: AIMarketAnalysis }> {
+  return apiClient.request<{ success: boolean; analysis: AIMarketAnalysis }>('/api/polymarket/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ marketId, question }),
+  });
+}
+
+export async function getPolymarketHistory(limit: number = 20): Promise<PolymarketBet[]> {
+  const response = await apiClient.request<{ history: PolymarketBet[] }>(`/api/polymarket/history?limit=${limit}`);
+  return response.history;
+}
+
+export async function getPolymarketBettingStats(): Promise<BettingStats> {
+  return apiClient.request<BettingStats>('/api/polymarket/stats');
+}
+
+export async function getPolymarketLeaderboard(): Promise<Leaderboard> {
+  return apiClient.request<Leaderboard>('/api/polymarket/leaderboard');
 }

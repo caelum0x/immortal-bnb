@@ -52,8 +52,35 @@ export default function WalletInfo() {
     try {
       setLoading(true);
       setError(null);
-      const data = await api.getPortfolio();
-      setPortfolio(data);
+
+      // Fetch data from multiple endpoints and combine
+      const [walletData, stats, positions] = await Promise.all([
+        api.getWalletBalance().catch(() => null),
+        api.getDashboardStats().catch(() => null),
+        api.getPositions().catch(() => null),
+      ]);
+
+      // Calculate portfolio from available data
+      const dexPnL = stats?.totalPL || 0;
+      const polymarketPnL = 0; // TODO: Add Polymarket P&L calculation
+
+      setPortfolio({
+        dex: {
+          balance: parseFloat(walletData?.balance || '0'),
+          pnl: dexPnL,
+          currency: 'BNB',
+        },
+        polymarket: {
+          balance: 0,
+          pnl: polymarketPnL,
+          currency: 'USDC',
+        },
+        total: {
+          dex_bnb: parseFloat(walletData?.balance || '0'),
+          polymarket_usd: 0,
+          combined_pnl: dexPnL + polymarketPnL,
+        },
+      });
     } catch (err: any) {
       console.error('Failed to fetch portfolio:', err);
       setError(err.message || 'Failed to load portfolio data');

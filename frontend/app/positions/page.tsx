@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Header from '@/components/layout/Header'
 import { useWeb3 } from '@/components/providers/Web3Provider'
+import TradingViewChart from '@/components/TradingViewChart'
 
 interface Position {
   id: string
@@ -23,6 +24,7 @@ export default function PositionsPage() {
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedPosition, setSelectedPosition] = useState<Position | null>(null)
 
   useEffect(() => {
     if (!isConnected) {
@@ -161,6 +163,29 @@ export default function PositionsPage() {
           </div>
         )}
 
+        {/* Price Chart for Selected Position */}
+        {selectedPosition && (
+          <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg p-6 mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-white">
+                {selectedPosition.tokenSymbol} Price Chart
+              </h3>
+              <button
+                onClick={() => setSelectedPosition(null)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <TradingViewChart
+              tokenId={selectedPosition.tokenAddress}
+              interval="1h"
+              height={500}
+              showVolumeChart={true}
+            />
+          </div>
+        )}
+
         {/* Positions Table */}
         {isConnected && !loading && positions.length > 0 && (
           <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg overflow-hidden">
@@ -183,11 +208,20 @@ export default function PositionsPage() {
                   {positions.map((position) => (
                     <tr key={position.id} className="hover:bg-slate-900/30 transition-colors">
                       <td className="px-6 py-4">
-                        <div>
-                          <div className="font-semibold text-white">{position.tokenSymbol}</div>
-                          <div className="text-xs text-slate-400 font-mono">
-                            {position.tokenAddress.slice(0, 6)}...{position.tokenAddress.slice(-4)}
+                        <div className="flex items-center gap-2">
+                          <div>
+                            <div className="font-semibold text-white">{position.tokenSymbol}</div>
+                            <div className="text-xs text-slate-400 font-mono">
+                              {position.tokenAddress.slice(0, 6)}...{position.tokenAddress.slice(-4)}
+                            </div>
                           </div>
+                          <button
+                            onClick={() => setSelectedPosition(position)}
+                            className="text-purple-400 hover:text-purple-300 text-sm transition-colors"
+                            title="View chart"
+                          >
+                            📊
+                          </button>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right text-white">${position.entryPrice.toFixed(4)}</td>

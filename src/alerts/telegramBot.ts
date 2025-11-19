@@ -694,3 +694,8 @@ export const telegramBotManager = new TelegramBotManager();
 export async function initializeTelegramBot(): Promise<void> {
   telegramBotManager.initialize();
 }
+
+/**
+ * Export TelegramBotManager as TelegramBot for backward compatibility
+ */
+export { TelegramBotManager as TelegramBot };

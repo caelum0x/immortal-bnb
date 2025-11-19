@@ -20,6 +20,7 @@ export interface TradeParams {
 export interface TradeResult {
   success: boolean;
   txHash?: string;
+  hash?: string; // Alias for txHash
   amountIn: string;
   amountOut: string;
   actualPrice: number;
