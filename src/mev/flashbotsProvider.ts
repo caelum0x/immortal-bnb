@@ -4,7 +4,7 @@
  */
 
 import { ethers } from 'ethers';
-import { FlashbotsBundleProvider } from '@flashbots/ethers-provider-bundle';
+import { FlashbotsBundleProvider } from'@flashbots/ethers-provider-bundle';
 import { logger } from '../utils/logger.js';
 import { CONFIG } from '../config.js';
 

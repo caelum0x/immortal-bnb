@@ -1,0 +1,63 @@
+{
+  "dashboard": {
+    "title": "Trading Performance Dashboard",
+    "tags": ["trading", "performance"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Trades",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(trades_total[5m]))",
+            "legendFormat": "Trades/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Profit/Loss Over Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "trade_profit_loss_total",
+            "legendFormat": "{{platform}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Win Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(trades_total{outcome=\"profit\"}[5m])) / sum(rate(trades_total[5m])) * 100",
+            "legendFormat": "Win Rate %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Trades by Platform",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (platform) (trades_total)",
+            "legendFormat": "{{platform}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      }
+    ],
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+  }
+}
+

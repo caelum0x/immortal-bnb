@@ -6,6 +6,7 @@
  */
 
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
+import { Wallet } from '@ethersproject/wallet';
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
@@ -53,6 +54,7 @@ export class PolymarketService {
   private client: ClobClient | null = null;
   private config: PolymarketConfig;
   private wallet: ethers.Wallet;
+  private ethersProjectWallet: Wallet;
   private provider: ethers.JsonRpcProvider;
 
   constructor() {
@@ -67,6 +69,8 @@ export class PolymarketService {
     const polygonRPC = process.env.POLYGON_RPC || 'https://polygon-rpc.com';
     this.provider = new ethers.JsonRpcProvider(polygonRPC);
     this.wallet = new ethers.Wallet(this.config.privateKey, this.provider);
+    // ClobClient requires @ethersproject/wallet for compatibility
+    this.ethersProjectWallet = new Wallet(this.config.privateKey);
 
     if (this.config.enabled) {
       this.initializeClient();
@@ -83,11 +87,12 @@ export class PolymarketService {
         return;
       }
 
-      this.client = new ClobClient({
-        host: this.config.host,
-        chainId: this.config.chainId,
-        privateKey: this.config.privateKey,
-      });
+      // ClobClient constructor: (host, chainId, signer?, creds?, signatureType?, funderAddress?, ...)
+      this.client = new ClobClient(
+        this.config.host,
+        this.config.chainId,
+        this.ethersProjectWallet
+      );
 
       logger.info(`Polymarket client initialized on chain ${this.config.chainId}`);
     } catch (error) {
@@ -151,16 +156,17 @@ export class PolymarketService {
     const client = this.client; // Type narrowing
 
     try {
-      const markets = await client.getMarkets();
+      const marketsPayload = await client.getMarkets();
+      const markets = marketsPayload.data || [];
 
       return markets.slice(0, limit).map((market: any) => ({
-        id: market.condition_id,
-        question: market.question,
+        id: market.condition_id || market.id,
+        question: market.question || market.title,
         outcomes: market.outcomes || [],
         volume: parseFloat(market.volume || '0'),
         liquidity: parseFloat(market.liquidity || '0'),
-        endDate: new Date(market.end_date_iso),
-        active: market.active,
+        endDate: new Date(market.end_date_iso || market.endDate || Date.now()),
+        active: market.active !== false,
       }));
     } catch (error) {
       logger.error('Error fetching markets:', error);
@@ -238,10 +244,14 @@ export class PolymarketService {
         return null;
       }
 
-      const bestBid = orderbook.bids[0].price;
-      const bestAsk = orderbook.asks[0].price;
+      const bestBid = orderbook.bids[0];
+      const bestAsk = orderbook.asks[0];
+      
+      if (!bestBid || !bestAsk) {
+        return null;
+      }
 
-      return (bestBid + bestAsk) / 2;
+      return (bestBid.price + bestAsk.price) / 2;
     } catch (error) {
       logger.error(`Error calculating mid price for ${marketId}:`, error);
       return null;
@@ -261,19 +271,27 @@ export class PolymarketService {
     try {
       logger.info(`Creating ${params.side} order for market ${params.marketId}: ${params.size} @ ${params.price}`);
 
-      // Create order
-      const order = {
-        marketId: params.marketId,
-        side: params.side as Side,
+      // Get market info to find tokenID
+      const market = await client.getMarket(params.marketId);
+      if (!market) {
+        logger.error(`Market ${params.marketId} not found`);
+        return null;
+      }
+
+      // Extract tokenID from market (could be in different formats)
+      const tokenID = market.token_id || market.tokens?.[params.outcomeIndex || 0] || params.marketId;
+
+      // Create order - ClobClient expects tokenID, not marketId
+      const signedOrder = await client.createOrder({
+        tokenID: tokenID,
+        side: params.side === 'BUY' ? Side.BUY : Side.SELL,
         price: params.price,
         size: params.size,
-        orderType: OrderType.GTC, // Good Till Cancelled
-        outcomeIndex: params.outcomeIndex || 0,
-      };
+      });
 
-      // Sign and submit order
-      const signedOrder = await client.createOrder(order);
-      const orderId = await client.postOrder(signedOrder);
+      // Submit order
+      const result = await client.postOrder(signedOrder, OrderType.GTC);
+      const orderId = result?.id || result?.hash || JSON.stringify(result);
 
       logger.info(`Order created successfully: ${orderId}`);
       return orderId;
@@ -295,12 +313,20 @@ export class PolymarketService {
     const client = this.client; // Type narrowing
 
     try {
-      await client.cancelOrder(orderId);
+      // cancelOrder expects OrderPayload (order hash), try using orderId as hash
+      await client.cancelOrder({ hash: orderId } as any);
       logger.info(`Order ${orderId} cancelled successfully`);
       return true;
     } catch (error) {
-      logger.error(`Error cancelling order ${orderId}:`, error);
-      return false;
+      // If that fails, try cancelOrders with array
+      try {
+        await client.cancelOrders([orderId]);
+        logger.info(`Order ${orderId} cancelled successfully`);
+        return true;
+      } catch (error2) {
+        logger.error(`Error cancelling order ${orderId}:`, error2);
+        return false;
+      }
     }
   }
 
@@ -315,8 +341,15 @@ export class PolymarketService {
     const client = this.client; // Type narrowing
 
     try {
-      const result = await client.cancelAll(marketId);
-      const cancelledCount = result.cancelled?.length || 0;
+      // cancelAll() takes no arguments - cancels all orders
+      // For market-specific cancellation, use cancelMarketOrders
+      let result: any;
+      if (marketId) {
+        result = await client.cancelMarketOrders({ tokenID: marketId } as any);
+      } else {
+        result = await client.cancelAll();
+      }
+      const cancelledCount = result?.cancelled?.length || result?.length || 0;
       logger.info(`Cancelled ${cancelledCount} orders`);
       return cancelledCount;
     } catch (error) {
@@ -336,8 +369,10 @@ export class PolymarketService {
     const client = this.client; // Type narrowing
 
     try {
-      const orders = await client.getOrders({ market: marketId });
-      return orders || [];
+      const params = marketId ? { market: marketId } : undefined;
+      const ordersResponse = await client.getOpenOrders(params);
+      // getOpenOrders returns OpenOrder[] (array directly)
+      return Array.isArray(ordersResponse) ? ordersResponse : [];
     } catch (error) {
       logger.error('Error fetching open orders:', error);
       return [];
@@ -346,6 +381,7 @@ export class PolymarketService {
 
   /**
    * Get positions
+   * Note: ClobClient doesn't have getPositions, using trades as alternative
    */
   async getPositions(): Promise<PositionInfo[]> {
     if (!this.client) {
@@ -355,15 +391,36 @@ export class PolymarketService {
     const client = this.client; // Type narrowing
 
     try {
-      const positions = await client.getPositions();
+      // ClobClient doesn't have getPositions, use getTrades to infer positions
+      const trades = await client.getTrades();
+      
+      // Group trades by token to calculate positions
+      const positionsMap = new Map<string, PositionInfo>();
+      
+      for (const trade of trades || []) {
+        const tokenID = trade.asset_id || trade.market;
+        if (!tokenID) continue;
 
-      return positions.map((pos: any) => ({
-        marketId: pos.market,
-        outcome: pos.outcome,
-        size: parseFloat(pos.size),
-        avgPrice: parseFloat(pos.avgPrice),
-        unrealizedPnL: parseFloat(pos.unrealizedPnL || '0'),
-      }));
+        const existing = positionsMap.get(tokenID) || {
+          marketId: tokenID,
+          outcome: trade.side || 'UNKNOWN',
+          size: 0,
+          avgPrice: 0,
+          unrealizedPnL: 0,
+        };
+
+        const tradeSize = parseFloat(trade.size || '0');
+        const tradePrice = parseFloat(trade.price || '0');
+        
+        // Calculate weighted average price
+        const totalValue = existing.size * existing.avgPrice + tradeSize * tradePrice;
+        existing.size += tradeSize;
+        existing.avgPrice = existing.size > 0 ? totalValue / existing.size : 0;
+
+        positionsMap.set(tokenID, existing);
+      }
+
+      return Array.from(positionsMap.values());
     } catch (error) {
       logger.error('Error fetching positions:', error);
       return [];
@@ -381,13 +438,17 @@ export class PolymarketService {
         return null;
       }
 
-      const bestAsk = orderbook.asks[0].price;
+      const bestAsk = orderbook.asks[0];
+      if (!bestAsk) {
+        logger.error('No asks available for market buy');
+        return null;
+      }
 
       // Create order slightly above best ask to ensure fill
       return await this.createOrder({
         marketId,
         side: 'BUY',
-        price: bestAsk + 0.01,
+        price: bestAsk.price + 0.01,
         size: amount,
       });
     } catch (error) {
@@ -407,13 +468,17 @@ export class PolymarketService {
         return null;
       }
 
-      const bestBid = orderbook.bids[0].price;
+      const bestBid = orderbook.bids[0];
+      if (!bestBid) {
+        logger.error('No bids available for market sell');
+        return null;
+      }
 
       // Create order slightly below best bid to ensure fill
       return await this.createOrder({
         marketId,
         side: 'SELL',
-        price: bestBid - 0.01,
+        price: bestBid.price - 0.01,
         size: amount,
       });
     } catch (error) {
@@ -433,8 +498,9 @@ export class PolymarketService {
     const client = this.client; // Type narrowing
 
     try {
-      const time = await client.getServerTime();
-      return new Date(time.timestamp * 1000);
+      // getServerTime() returns a number (Unix timestamp in seconds)
+      const timestamp = await client.getServerTime();
+      return new Date(timestamp * 1000);
     } catch (error) {
       logger.error('Error fetching server time:', error);
       return new Date();

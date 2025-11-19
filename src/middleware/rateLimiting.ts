@@ -73,3 +73,26 @@ export const readLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Bot control operations rate limiter
+export const botControlLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // 5 start/stop operations per minute
+  message: {
+    error: 'Too many bot control requests',
+    message: 'Please wait before trying again',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Health check rate limiter (very permissive)
+export const healthCheckLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 health checks per minute
+  message: {
+    error: 'Too many health check requests',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

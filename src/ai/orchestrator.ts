@@ -147,20 +147,21 @@ export class AIOrchestrator {
       const memories = await this.tsAgent.loadMemories();
 
       // Make decision
-      const decision = await this.tsAgent.shouldTrade(
+      const decision = await this.tsAgent.makeDecision(
         request.asset.tokenAddress || '',
-        request.marketData
+        request.marketData,
+        0 // availableAmount not in DecisionRequest, using 0 as default
       );
 
       return {
-        shouldTrade: decision.shouldTrade,
+        shouldTrade: decision.action !== 'HOLD',
         confidence: decision.confidence,
         reasoning: decision.reasoning,
         strategy: decision.strategy || 'momentum',
-        signals: decision.signals || [],
+        signals: [],
         model: 'typescript-agent',
-        estimatedProfit: decision.estimatedProfit,
-        riskLevel: this.calculateRiskLevel(decision.confidence),
+        estimatedProfit: 0,
+        riskLevel: decision.riskLevel.toLowerCase() as 'low' | 'medium' | 'high',
       };
     } catch (error) {
       logger.error('TypeScript agent error:', error);
@@ -273,8 +274,8 @@ export class AIOrchestrator {
   private extractConfidence(text: string): number {
     // Try to find percentage in text
     const match = text.match(/(\d+)%/);
-    if (match) {
-      return parseInt(match[1]) / 100;
+    if (match && match[1]) {
+      return parseInt(match[1], 10) / 100;
     }
 
     // Default based on sentiment

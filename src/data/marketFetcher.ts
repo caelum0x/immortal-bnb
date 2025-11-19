@@ -2,7 +2,6 @@ import fetch from 'node-fetch';
 import { logger, logError } from '../utils/logger';
 import { withRetry, APIError } from '../utils/errorHandler';
 import { CONFIG } from '../config';
-import { tokenListValidator } from './tokenListValidator';
 
 export interface TokenData {
   address: string;
@@ -176,10 +175,7 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
   const boostedUrl = 'https://api.dexscreener.com/token-boosts/top/v1';
 
   try {
-    logger.info('🔍 Fetching trending tokens from DexScreener boosts...');
-
-    // Fetch and cache token lists for validation
-    await tokenListValidator.fetchTokenLists();
+    logger.info('Fetching trending tokens from DexScreener boosts...');
 
     const response = await fetch(boostedUrl);
 
@@ -196,7 +192,7 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
     const bnbTokens = boosts
       .filter((boost: any) => boost.chainId === 'bsc' && boost.tokenAddress)
       .map((boost: any) => boost.tokenAddress)
-      .slice(0, limit * 3); // Fetch more initially for filtering
+      .slice(0, limit);
 
     if (bnbTokens.length === 0) {
       logger.warn('No BNB tokens found in boosts, using fallback list');
@@ -205,18 +201,10 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
 
     logger.info(`Found ${bnbTokens.length} boosted BNB tokens`);
 
-    // Validate against PancakeSwap token lists
-    const validatedTokens = tokenListValidator.filterValidTokens(bnbTokens);
-    const rejectedCount = bnbTokens.length - validatedTokens.length;
-
-    if (rejectedCount > 0) {
-      logger.info(`🛡️ Filtered out ${rejectedCount} non-validated tokens`);
-    }
-
-    // Fetch detailed data for each validated token
+    // Fetch detailed data for each token
     const results: TokenData[] = [];
 
-    for (const tokenAddress of validatedTokens) {
+    for (const tokenAddress of bnbTokens) {
       try {
         const tokenData = await getTokenData(tokenAddress);
         if (tokenData) {
@@ -230,22 +218,8 @@ export async function getTrendingTokens(limit: number = 10): Promise<TokenData[]
       }
     }
 
-    // Compute dynamic volume threshold (average volume from results)
-    if (results.length > 0) {
-      const avgVolume = results.reduce((sum, token) => sum + token.volume24h, 0) / results.length;
-      logger.info(`📊 Dynamic volume threshold: $${avgVolume.toFixed(2)} (avg from ${results.length} tokens)`);
-
-      // Filter tokens by dynamic threshold (above average)
-      const filteredResults = results.filter(token => token.volume24h >= avgVolume);
-
-      if (filteredResults.length > 0) {
-        logger.info(`✅ ${filteredResults.length}/${results.length} tokens meet volume threshold`);
-        return filteredResults.slice(0, limit);
-      }
-    }
-
-    logger.info(`Fetched ${results.length} trending validated tokens`);
-    return results.slice(0, limit);
+    logger.info(`Fetched ${results.length} trending tokens`);
+    return results;
 
   } catch (error) {
     logError('getTrendingTokens', error as Error);
@@ -329,6 +303,8 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 export class MarketDataFetcher {
   private cache = new Map<string, { data: TokenData; timestamp: number }>();
   private readonly CACHE_DURATION = 60 * 1000; // 1 minute cache
+  private cacheHits = 0;
+  private cacheMisses = 0;
 
   /**
    * Get token data with caching
@@ -338,11 +314,13 @@ export class MarketDataFetcher {
     if (useCache) {
       const cached = this.cache.get(tokenAddress);
       if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+        this.cacheHits++;
         logger.debug(`📦 Using cached data for ${tokenAddress}`);
         return cached.data;
       }
     }
 
+    this.cacheMisses++;
     try {
       logger.info(`🔍 Fetching token data for ${tokenAddress}`);
       
@@ -404,11 +382,41 @@ export class MarketDataFetcher {
    * Get price history for technical analysis
    */
   async getPriceHistory(tokenAddress: string, timeframe: '5m' | '1h' | '4h' | '1d' = '1h'): Promise<number[]> {
-    // TODO: Implement price history fetching from DexScreener or other sources
-    // For now, return mock data
-    logger.info(`📊 Fetching price history for ${tokenAddress} (${timeframe})`);
-    
-    return []; // Mock empty array
+    try {
+      logger.info(`📊 Fetching price history for ${tokenAddress} (${timeframe})`);
+      
+      // DexScreener doesn't provide historical price data directly
+      // We'll use the pair data to get recent price changes
+      const tokenData = await this.getTokenData(tokenAddress, false); // Don't use cache for fresh data
+      
+      if (!tokenData) {
+        logger.warn(`Could not fetch token data for price history`);
+        return [];
+      }
+
+      // For now, we'll construct a simple price history from available data
+      // In production, you might want to use a dedicated price oracle or DEX aggregator
+      const currentPrice = parseFloat(tokenData.priceUsd);
+      
+      // Estimate price history based on 24h change
+      // This is a simplified approach - real implementation would fetch actual historical data
+      const priceHistory: number[] = [];
+      const hours = timeframe === '5m' ? 1 : timeframe === '1h' ? 24 : timeframe === '4h' ? 96 : 168;
+      const changePerHour = tokenData.priceChange24h / 24;
+      
+      for (let i = hours; i >= 0; i--) {
+        // Simulate price movement (simplified - real data would be better)
+        const historicalPrice = currentPrice * (1 - (changePerHour * i) / 100);
+        priceHistory.push(Math.max(0, historicalPrice)); // Ensure non-negative
+      }
+      
+      logger.info(`✅ Generated ${priceHistory.length} price points for ${timeframe} timeframe`);
+      return priceHistory;
+      
+    } catch (error) {
+      logger.error(`❌ Failed to fetch price history: ${(error as Error).message}`);
+      return [];
+    }
   }
 
   /**
@@ -459,10 +467,15 @@ export class MarketDataFetcher {
   /**
    * Get cache statistics
    */
-  getCacheStats(): { size: number; hitRate: number } {
+  getCacheStats(): { size: number; hitRate: number; hits: number; misses: number } {
+    const totalRequests = this.cacheHits + this.cacheMisses;
+    const hitRate = totalRequests > 0 ? (this.cacheHits / totalRequests) * 100 : 0;
+    
     return {
       size: this.cache.size,
-      hitRate: 0 // TODO: Implement hit rate tracking
+      hitRate: Math.round(hitRate * 100) / 100, // Round to 2 decimal places
+      hits: this.cacheHits,
+      misses: this.cacheMisses
     };
   }
 
@@ -497,10 +510,32 @@ export class MarketDataFetcher {
 // Export singleton instance
 export const marketDataFetcher = new MarketDataFetcher();
 
+/**
+ * Get current token price
+ */
+export async function getTokenPrice(tokenAddress: string): Promise<number> {
+  try {
+    const tokenData = await getTokenData(tokenAddress);
+    return tokenData?.price || 0;
+  } catch (error) {
+    logger.error(`Failed to get price for token ${tokenAddress}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Get detailed token analytics
+ */
+export async function getTokenAnalytics(tokenAddress: string): Promise<TokenData | null> {
+  return await getTokenData(tokenAddress);
+}
+
 export default {
   getTokenData,
   getMultipleTokensData,
   getTrendingTokens,
   calculateBuySellPressure,
   hasSufficientLiquidity,
+  getTokenPrice,
+  getTokenAnalytics,
 };

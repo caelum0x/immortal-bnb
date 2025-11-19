@@ -1,0 +1,219 @@
+# Production Docker Compose Configuration
+# Optimized for production deployment with monitoring and scaling
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: immortal-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-immortal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-immortal_bot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "5432:5432"
+    networks:
+      - immortal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-immortal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+
+  # ============================================================================
+  # Redis Cache
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: immortal-redis-prod
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - immortal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # TypeScript Backend (API Gateway + DEX Trading)
+  # ============================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: immortal-backend-prod
+    environment:
+      - NODE_ENV=production
+      - API_PORT=3001
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-immortal}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-immortal_bot}
+      - REDIS_URL=redis://redis:6379
+      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GREENFIELD_BUCKET_NAME=${GREENFIELD_BUCKET_NAME}
+      - GREENFIELD_RPC_URL=${GREENFIELD_RPC_URL}
+      - GREENFIELD_CHAIN_ID=${GREENFIELD_CHAIN_ID}
+      - PYTHON_API_URL=http://python-api:5000
+      - PYTHON_API_KEY=${PYTHON_API_KEY:-}
+      - TRADING_NETWORK=${TRADING_NETWORK:-opbnb}
+      - NETWORK=${NETWORK:-mainnet}
+      - POLYMARKET_ENABLED=${POLYMARKET_ENABLED:-true}
+      - ENABLE_TRACING=${ENABLE_TRACING:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      python-api:
+        condition: service_healthy
+    networks:
+      - immortal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    # Scale horizontally
+    # docker-compose -f docker-compose.prod.yml up -d --scale backend=3
+
+  # ============================================================================
+  # Python Microservice (Polymarket AI Agents)
+  # ============================================================================
+  python-api:
+    build:
+      context: ./agents
+      dockerfile: Dockerfile
+    container_name: immortal-python-api-prod
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=5000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - POLYGON_WALLET_PRIVATE_KEY=${POLYGON_WALLET_PRIVATE_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - NEWSAPI_API_KEY=${NEWSAPI_API_KEY:-}
+      - ENABLE_TRADING=${ENABLE_TRADING:-false}
+      - PYTHON_API_KEY=${PYTHON_API_KEY:-}
+    networks:
+      - immortal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./agents/logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ============================================================================
+  # Prometheus (Metrics Collection)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: immortal-prometheus-prod
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    networks:
+      - immortal-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # Grafana (Dashboards)
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: immortal-grafana-prod
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3002:3000"
+    networks:
+      - immortal-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ============================================================================
+  # Alertmanager (Alert Routing)
+  # ============================================================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: immortal-alertmanager-prod
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - immortal-network
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+
+networks:
+  immortal-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+

@@ -65,3 +65,145 @@ enum ToolCallType {
   CREATE_POSITION
   CLOSE_POSITION
 }
+
+// =============================================================================
+// TRADING BOT MODELS
+// =============================================================================
+
+model Trade {
+  id              String   @id @default(uuid())
+  tokenAddress    String
+  tokenSymbol     String
+  action          String   // 'buy' | 'sell'
+  amountBNB       String   // Use String for precision
+  amountTokens    String
+  entryPrice      String
+  exitPrice       String?
+  actualPrice     String?
+  txHash          String?  @unique
+  gasUsed         String?
+  slippagePercent Float?
+  outcome         String?  // 'profit' | 'loss' | 'pending' | 'failed'
+  profitLoss      String?
+  confidence      Float?
+  strategy        String?
+  riskLevel       String?
+  aiReasoning     String?  @db.Text
+  marketConditions Json?
+  memoryId        String?  // Greenfield memory ID
+  platform        String   @default("pancakeswap")
+  chain           String   @default("bnb")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tokenAddress])
+  @@index([txHash])
+  @@index([outcome])
+  @@index([createdAt])
+  @@index([platform])
+}
+
+model BotState {
+  id              String   @id @default(uuid())
+  isRunning       Boolean  @default(false)
+  riskLevel       Int      @default(5)
+  maxTradeAmount  Float    @default(0.1)
+  stopLoss        Float    @default(10.0)
+  interval        Int      @default(300000)
+  network         String   @default("testnet")
+  watchlist       String[] // Array of token addresses
+  lastCycleAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([id])
+}
+
+model PerformanceMetrics {
+  id              String   @id @default(uuid())
+  date            DateTime @default(now()) @db.Date
+  totalTrades     Int      @default(0)
+  successfulTrades Int     @default(0)
+  failedTrades    Int      @default(0)
+  totalProfitLoss String   @default("0")
+  winRate         Float    @default(0)
+  avgTradeTime    Int?     // milliseconds
+  totalVolume     String   @default("0")
+  platform        String   @default("pancakeswap")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([date, platform])
+  @@index([date])
+  @@index([platform])
+}
+
+model AIDecision {
+  id              String   @id @default(uuid())
+  tokenAddress    String
+  tokenSymbol     String
+  action          String   // 'BUY' | 'SELL' | 'HOLD'
+  amount          Float    // 0-1 percentage
+  confidence      Float
+  reasoning       String   @db.Text
+  strategy        String
+  riskLevel       String
+  agentType       String   @default("immortal")
+  platform        String   @default("pancakeswap")
+  marketData      Json?
+  executed        Boolean  @default(false)
+  tradeId         String?  // Reference to Trade if executed
+  createdAt       DateTime @default(now())
+
+  @@index([tokenAddress])
+  @@index([action])
+  @@index([confidence])
+  @@index([createdAt])
+  @@index([agentType])
+}
+
+model ErrorLog {
+  id              String   @id @default(uuid())
+  context         String
+  errorType       String
+  errorMessage    String   @db.Text
+  stackTrace      String?  @db.Text
+  severity        String   @default("error") // 'error' | 'warning' | 'critical'
+  metadata        Json?
+  resolved        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([severity])
+  @@index([errorType])
+  @@index([createdAt])
+  @@index([resolved])
+}
+
+model ApiKey {
+  id              String   @id @default(uuid())
+  keyHash         String   @unique // Hashed API key
+  name            String
+  permissions     String[] // Array of permission strings
+  rateLimit       Int      @default(100) // Requests per 15 minutes
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revoked         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([keyHash])
+  @@index([revoked])
+}
+
+model Session {
+  id              String   @id @default(uuid())
+  userId          String?  // If user authentication is added
+  ipAddress      String?
+  userAgent      String?
+  lastActivityAt DateTime @default(now())
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}

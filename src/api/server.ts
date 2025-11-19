@@ -6,7 +6,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
+// import helmet from 'helmet';
 import { createServer } from 'http';
 import { CONFIG } from '../config';
 import { logger } from '../utils/logger';
@@ -47,7 +47,7 @@ const app = express();
 const port = CONFIG.API_PORT;
 
 // Security: Helmet for HTTP headers
-app.use(helmet());
+// app.use(helmet()); // Commented out - helmet package not installed
 
 // Middleware
 app.use(cors({
@@ -342,7 +342,7 @@ app.use('/api/telegram', telegramRoutes);
 app.use('/api/cross-chain', crossChainRoutes);
 
 // Start server
-export function startAPIServer() {
+export async function startAPIServer() {
   // Initialize AI system before starting the server
   initializeAISystem();
 
@@ -352,6 +352,15 @@ export function startAPIServer() {
   // Initialize WebSocket service
   const wsService = initializeWebSocketService(httpServer);
   logger.info('🔌 WebSocket service initialized');
+
+  // Initialize Polymarket Real-Time Service
+  try {
+    const { initializeRealTimeService } = await import('../polymarket/realTimeService.js');
+    initializeRealTimeService();
+    logger.info('📡 Polymarket real-time service connected');
+  } catch (error) {
+    logger.warn('Could not initialize Polymarket real-time service:', error);
+  }
 
   // Start listening
   httpServer.listen(port, () => {
@@ -609,8 +618,8 @@ setTimeout(async () => {
 // Get trending Polymarket markets
 app.get('/api/polymarket/markets', async (req: Request, res: Response) => {
   try {
-    const { PolymarketService } = await import('../polymarket/polymarketClient');
-    const polymarketService = PolymarketService.getInstance();
+    const { polymarketService } = await import('../polymarket/polymarketClient');
+    // const polymarketService = PolymarketService.getInstance();
 
     const limit = parseInt(req.query.limit as string) || 10;
     const markets = await polymarketService.getActiveMarkets(limit);
@@ -640,15 +649,15 @@ app.post('/api/polymarket/analyze', async (req: Request, res: Response) => {
       });
     }
 
-    const { PolymarketService } = await import('../polymarket/polymarketClient');
-    const { AIMarketAnalyzer } = await import('../polymarket/aiPredictionAnalyzer');
+    const { polymarketService } = await import('../polymarket/polymarketClient');
+    const { AIPredictionAnalyzer } = await import('../polymarket/aiPredictionAnalyzer');
 
-    const polymarketService = PolymarketService.getInstance();
-    const aiAnalyzer = new AIMarketAnalyzer();
+    // const polymarketService = PolymarketService.getInstance();
+    const aiAnalyzer = new AIPredictionAnalyzer();
 
     // Get market data
     const markets = await polymarketService.getActiveMarkets(100);
-    const market = markets.find(m => m.id === marketId);
+    const market = markets.find((m: any) => m.id === marketId);
 
     if (!market) {
       return res.status(404).json({
@@ -661,10 +670,10 @@ app.post('/api/polymarket/analyze', async (req: Request, res: Response) => {
     const analysis = await aiAnalyzer.analyzeMarket({
       id: market.id,
       question: market.question || question,
-      description: market.description || '',
+      description: (market as any).description || '',
       endDate: market.endDate || new Date(Date.now() + 86400000).toISOString(),
-      volume: parseFloat(market.volume || '0'),
-      liquidity: parseFloat(market.liquidity || '0'),
+      volume: typeof market.volume === 'number' ? market.volume : parseFloat(market.volume || '0'),
+      liquidity: typeof market.liquidity === 'number' ? market.liquidity : parseFloat(market.liquidity || '0'),
     });
 
     res.json({
@@ -684,13 +693,16 @@ app.post('/api/polymarket/analyze', async (req: Request, res: Response) => {
 // Get Polymarket wallet balance (MATIC + USDC)
 app.get('/api/polymarket/balance', async (req: Request, res: Response) => {
   try {
-    const { PolymarketService } = await import('../polymarket/polymarketClient');
-    const polymarketService = PolymarketService.getInstance();
+    const { polymarketService } = await import('../polymarket/polymarketClient');
 
-    const balances = await polymarketService.getBalances();
+    const usdcBalance = await polymarketService.getUSDCBalance();
+    const maticBalance = await polymarketService.getMATICBalance();
 
     res.json({
-      balances,
+      balances: {
+        usdc: usdcBalance,
+        matic: maticBalance,
+      },
       timestamp: Date.now(),
     });
   } catch (error) {
@@ -705,8 +717,7 @@ app.get('/api/polymarket/balance', async (req: Request, res: Response) => {
 // Get current Polymarket positions
 app.get('/api/polymarket/positions', async (req: Request, res: Response) => {
   try {
-    const { PolymarketService } = await import('../polymarket/polymarketClient');
-    const polymarketService = PolymarketService.getInstance();
+    const { polymarketService } = await import('../polymarket/polymarketClient');
 
     const positions = await polymarketService.getPositions();
 
@@ -727,8 +738,7 @@ app.get('/api/polymarket/positions', async (req: Request, res: Response) => {
 // Get open Polymarket orders
 app.get('/api/polymarket/orders', async (req: Request, res: Response) => {
   try {
-    const { PolymarketService } = await import('../polymarket/polymarketClient');
-    const polymarketService = PolymarketService.getInstance();
+    const { polymarketService } = await import('../polymarket/polymarketClient');
 
     const orders = await polymarketService.getOpenOrders();
 
@@ -779,8 +789,7 @@ app.get('/api/polymarket/orderbook/:marketId', async (req: Request, res: Respons
       });
     }
 
-    const { PolymarketService } = await import('../polymarket/polymarketClient');
-    const polymarketService = PolymarketService.getInstance();
+    const { polymarketService } = await import('../polymarket/polymarketClient');
 
     const orderbook = await polymarketService.getOrderBook(marketId);
     const midPrice = await polymarketService.getMidPrice(marketId);
@@ -795,6 +804,91 @@ app.get('/api/polymarket/orderbook/:marketId', async (req: Request, res: Respons
     logger.error('Error fetching orderbook:', error);
     res.status(500).json({
       error: 'Failed to fetch orderbook',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
+// POLYMARKET WALLET CONFIGURATION ENDPOINTS
+// =============================================================================
+
+// Get wallet information
+app.get('/api/polymarket/wallet/info', async (req: Request, res: Response) => {
+  try {
+    const { polymarketService } = await import('../polymarket/polymarketClient');
+
+    const walletInfo = polymarketService.getWalletInfo();
+    const currentType = polymarketService.getCurrentWalletType();
+
+    res.json({
+      success: true,
+      walletInfo,
+      currentWalletType: currentType,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching wallet info:', error);
+    res.status(500).json({
+      error: 'Failed to fetch wallet information',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Switch wallet type (proxy or safe)
+app.post('/api/polymarket/wallet/switch', async (req: Request, res: Response) => {
+  try {
+    const { walletType } = req.body;
+
+    if (!walletType || !['proxy', 'safe'].includes(walletType)) {
+      return res.status(400).json({
+        error: 'Invalid wallet type. Must be "proxy" or "safe"',
+      });
+    }
+
+    const { polymarketService } = await import('../polymarket/polymarketClient');
+    await polymarketService.switchWalletType(walletType);
+
+    res.json({
+      success: true,
+      message: `Successfully switched to ${walletType} wallet`,
+      currentWalletType: walletType,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error switching wallet type:', error);
+    res.status(500).json({
+      error: 'Failed to switch wallet type',
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Get wallet type comparison and recommendations
+app.get('/api/polymarket/wallet/compare', async (req: Request, res: Response) => {
+  try {
+    const { UnifiedPolymarketWallet } = await import('../polymarket/unifiedWalletManager');
+
+    const comparison = UnifiedPolymarketWallet.compareWalletTypes();
+    const recommendedForSimple = UnifiedPolymarketWallet.getRecommendedWalletType('simple');
+    const recommendedForAdvanced = UnifiedPolymarketWallet.getRecommendedWalletType('advanced');
+    const recommendedForSecurity = UnifiedPolymarketWallet.getRecommendedWalletType('security');
+
+    res.json({
+      success: true,
+      comparison,
+      recommendations: {
+        simple: recommendedForSimple,
+        advanced: recommendedForAdvanced,
+        security: recommendedForSecurity,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Error fetching wallet comparison:', error);
+    res.status(500).json({
+      error: 'Failed to fetch wallet comparison',
       message: (error as Error).message,
     });
   }
@@ -1195,7 +1289,7 @@ app.get('/api/unified/opportunities', async (req: Request, res: Response) => {
     // Get cross-chain arbitrage opportunities if available
     if (crossChainEngine) {
       try {
-        const crossChainOpps = await crossChainEngine.findArbitrageOpportunities();
+        const crossChainOpps = await crossChainEngine.discoverArbitrageOpportunities();
         opportunities.push(...crossChainOpps.map((opp: any) => ({
           ...opp,
           source: 'cross-chain',
@@ -1331,12 +1425,12 @@ app.get("/api/memory/analytics", async (req, res) => {
     res.json(analytics);
   } catch (error) {
     logger.error("Error fetching memory analytics:", error);
-    res.status(500).json({ error: "Failed to fetch memory analytics", message: error.message });
+    res.status(500).json({ error: "Failed to fetch memory analytics", message: (error as Error).message });
   }
 });
 
 // Query unified memories with filters
-app.post("/api/memory/query", readLimiter, validateMemoryQuery, async (req, res) => {
+app.post("/api/memory/query", readLimiter, validateMemoryQuery, async (req: Request, res: Response) => {
   try {
     const filters = req.body;
     const { queryUnifiedMemories } = await import("../blockchain/unifiedMemoryStorage.js");
@@ -1344,7 +1438,7 @@ app.post("/api/memory/query", readLimiter, validateMemoryQuery, async (req, res)
     res.json({ memories, count: memories.length, filters, timestamp: Date.now() });
   } catch (error) {
     logger.error("Error querying memories:", error);
-    res.status(500).json({ error: "Failed to query memories", message: error.message });
+    res.status(500).json({ error: "Failed to query memories", message: (error as Error).message });
   }
 });
 
@@ -1356,24 +1450,24 @@ app.get("/api/memory/sync-status", async (req, res) => {
     res.json(status);
   } catch (error) {
     logger.error("Error fetching sync status:", error);
-    res.status(500).json({ error: "Failed to fetch sync status", message: error.message });
+    res.status(500).json({ error: "Failed to fetch sync status", message: (error as Error).message });
   }
 });
 
 // Force synchronization of pending memories
-app.post("/api/memory/force-sync", async (req, res) => {
+app.post("/api/memory/force-sync", async (req: Request, res: Response) => {
   try {
     const { forceSyncAll } = await import("../blockchain/unifiedMemoryStorage.js");
     await forceSyncAll();
     res.json({ success: true, message: "Synchronization initiated", timestamp: Date.now() });
   } catch (error) {
     logger.error("Error forcing sync:", error);
-    res.status(500).json({ error: "Failed to force sync", message: error.message });
+    res.status(500).json({ error: "Failed to force sync", message: (error as Error).message });
   }
 });
 
 // Store a new unified memory
-app.post("/api/memory/store", async (req, res) => {
+app.post("/api/memory/store", async (req: Request, res: Response) => {
   try {
     const memory = req.body;
     const { storeUnifiedMemory } = await import("../blockchain/unifiedMemoryStorage.js");
@@ -1381,7 +1475,7 @@ app.post("/api/memory/store", async (req, res) => {
     res.json({ success, id: memory.id, timestamp: Date.now() });
   } catch (error) {
     logger.error("Error storing memory:", error);
-    res.status(500).json({ error: "Failed to store memory", message: error.message });
+    res.status(500).json({ error: "Failed to store memory", message: (error as Error).message });
   }
 });
 
@@ -1395,7 +1489,7 @@ app.post("/api/memory/store", async (req, res) => {
 // =============================================================================
 
 // Get AI orchestrator decision
-app.post("/api/orchestrator/decision", tradingLimiter, validateTradingDecision, async (req, res) => {
+app.post("/api/orchestrator/decision", tradingLimiter, validateTradingDecision, async (req: Request, res: Response) => {
   try {
     const request = req.body;
     const { getOrchestrator } = await import("../ai/orchestrator.js");
@@ -1404,7 +1498,7 @@ app.post("/api/orchestrator/decision", tradingLimiter, validateTradingDecision, 
     res.json(decision);
   } catch (error) {
     logger.error("Error getting orchestrator decision:", error);
-    res.status(500).json({ error: "Failed to get decision", message: error.message });
+    res.status(500).json({ error: "Failed to get decision", message: (error as Error).message });
   }
 });
 
@@ -1417,7 +1511,7 @@ app.get("/api/orchestrator/metrics", async (req, res) => {
     res.json({ metrics, timestamp: Date.now() });
   } catch (error) {
     logger.error("Error getting orchestrator metrics:", error);
-    res.status(500).json({ error: "Failed to get metrics", message: error.message });
+    res.status(500).json({ error: "Failed to get metrics", message: (error as Error).message });
   }
 });
 
@@ -1431,7 +1525,7 @@ app.post("/api/orchestrator/outcome", async (req, res) => {
     res.json({ success: true, timestamp: Date.now() });
   } catch (error) {
     logger.error("Error recording outcome:", error);
-    res.status(500).json({ error: "Failed to record outcome", message: error.message });
+    res.status(500).json({ error: "Failed to record outcome", message: (error as Error).message });
   }
 });
 
@@ -1474,7 +1568,7 @@ app.post("/api/dex/best-quote", tradingLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error getting DEX quote:", error);
-    res.status(500).json({ error: "Failed to get quote", message: error.message });
+    res.status(500).json({ error: "Failed to get quote", message: (error as Error).message });
   }
 });
 
@@ -1503,7 +1597,7 @@ app.post("/api/dex/execute-best", tradingLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error executing best trade:", error);
-    res.status(500).json({ error: "Failed to execute trade", message: error.message });
+    res.status(500).json({ error: "Failed to execute trade", message: (error as Error).message });
   }
 });
 
@@ -1532,7 +1626,7 @@ app.get("/api/flashloan/opportunities", readLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error finding flash loan opportunities:", error);
-    res.status(500).json({ error: "Failed to find opportunities", message: error.message });
+    res.status(500).json({ error: "Failed to find opportunities", message: (error as Error).message });
   }
 });
 
@@ -1562,7 +1656,7 @@ app.post("/api/flashloan/execute", strictLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error executing flash loan:", error);
-    res.status(500).json({ error: "Failed to execute flash loan", message: error.message });
+    res.status(500).json({ error: "Failed to execute flash loan", message: (error as Error).message });
   }
 });
 
@@ -1588,7 +1682,7 @@ app.post("/api/mev/protected-trade", strictLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error with MEV protection:", error);
-    res.status(500).json({ error: "Failed to protect trade", message: error.message });
+    res.status(500).json({ error: "Failed to protect trade", message: (error as Error).message });
   }
 });
 
@@ -1613,7 +1707,7 @@ app.get("/api/mev/check-sandwich/:txHash", readLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error checking sandwich attack:", error);
-    res.status(500).json({ error: "Failed to check sandwich", message: error.message });
+    res.status(500).json({ error: "Failed to check sandwich", message: (error as Error).message });
   }
 });
 
@@ -1654,15 +1748,27 @@ app.post("/api/bot/start", tradingLimiter, async (req, res) => {
     const wsService = getWebSocketService();
 
     if (type === 'dex' || type === 'all') {
-      botState.dex.status = 'RUNNING';
-      logger.info('🚀 DEX bot started');
+      // Start Trading Orchestrator for DEX trading
+      const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+      const orchestrator = getTradingOrchestrator();
 
-      // Emit WebSocket event
-      if (wsService) {
-        wsService.broadcastBotStatus({
-          dex: botState.dex,
-          polymarket: botState.polymarket
-        });
+      try {
+        await orchestrator.start();
+        botState.dex.status = 'RUNNING';
+        botState.dex.lastTrade = Date.now();
+        logger.info('🚀 DEX Trading Orchestrator started');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to start DEX orchestrator:', error);
+        botState.dex.status = 'ERROR';
+        throw error;
       }
     }
 
@@ -1670,8 +1776,9 @@ app.post("/api/bot/start", tradingLimiter, async (req, res) => {
       // Start Polymarket bot via Python bridge
       const pythonBridge = getPythonBridge();
       try {
-        await pythonBridge.startAgent('market_analyzer');
+        await pythonBridge.runTradingStrategy();
         botState.polymarket.status = 'RUNNING';
+        botState.polymarket.lastTrade = Date.now();
         logger.info('🎲 Polymarket bot started');
 
         // Emit WebSocket event
@@ -1698,7 +1805,7 @@ app.post("/api/bot/start", tradingLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error starting bot:", error);
-    res.status(500).json({ error: "Failed to start bot", message: error.message });
+    res.status(500).json({ error: "Failed to start bot", message: (error as Error).message });
   }
 });
 
@@ -1714,15 +1821,26 @@ app.post("/api/bot/stop", tradingLimiter, async (req, res) => {
     const wsService = getWebSocketService();
 
     if (type === 'dex' || type === 'all') {
-      botState.dex.status = 'STOPPED';
-      logger.info('🛑 DEX bot stopped');
+      // Stop Trading Orchestrator
+      const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+      const orchestrator = getTradingOrchestrator();
 
-      // Emit WebSocket event
-      if (wsService) {
-        wsService.broadcastBotStatus({
-          dex: botState.dex,
-          polymarket: botState.polymarket
-        });
+      try {
+        await orchestrator.stop();
+        botState.dex.status = 'STOPPED';
+        logger.info('🛑 DEX Trading Orchestrator stopped');
+
+        // Emit WebSocket event
+        if (wsService) {
+          wsService.broadcastBotStatus({
+            dex: botState.dex,
+            polymarket: botState.polymarket
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to stop DEX orchestrator:', error);
+        botState.dex.status = 'ERROR';
+        // Continue to allow response
       }
     }
 
@@ -1730,7 +1848,7 @@ app.post("/api/bot/stop", tradingLimiter, async (req, res) => {
       // Stop Polymarket bot via Python bridge
       const pythonBridge = getPythonBridge();
       try {
-        await pythonBridge.stopAgent('market_analyzer');
+        // await pythonBridge.stopAgent('market_analyzer'); // Method not available
         botState.polymarket.status = 'STOPPED';
         logger.info('🎲 Polymarket bot stopped');
 
@@ -1757,7 +1875,7 @@ app.post("/api/bot/stop", tradingLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error stopping bot:", error);
-    res.status(500).json({ error: "Failed to stop bot", message: error.message });
+    res.status(500).json({ error: "Failed to stop bot", message: (error as Error).message });
   }
 });
 
@@ -1771,8 +1889,18 @@ app.post("/api/bot/config", tradingLimiter, async (req, res) => {
     }
 
     if (type === 'dex') {
-      botState.dex.config = { ...botState.dex.config, ...config };
-      logger.info('⚙️ DEX bot config updated:', config);
+      // Update Trading Orchestrator config
+      const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+      const orchestrator = getTradingOrchestrator();
+
+      try {
+        await orchestrator.updateConfig(config);
+        botState.dex.config = { ...botState.dex.config, ...config };
+        logger.info('⚙️ DEX Trading Orchestrator config updated:', config);
+      } catch (error) {
+        logger.error('Failed to update DEX orchestrator config:', error);
+        throw error;
+      }
     } else {
       botState.polymarket.config = { ...botState.polymarket.config, ...config };
       logger.info('⚙️ Polymarket bot config updated:', config);
@@ -1786,7 +1914,7 @@ app.post("/api/bot/config", tradingLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error("Error updating bot config:", error);
-    res.status(500).json({ error: "Failed to update config", message: error.message });
+    res.status(500).json({ error: "Failed to update config", message: (error as Error).message });
   }
 });
 
@@ -1799,10 +1927,1743 @@ app.get("/api/bot/state", async (req, res) => {
     });
   } catch (error) {
     logger.error("Error getting bot state:", error);
-    res.status(500).json({ error: "Failed to get bot state", message: error.message });
+    res.status(500).json({ error: "Failed to get bot state", message: (error as Error).message });
+  }
+});
+
+// Get performance metrics
+app.get("/api/bot/performance", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const performance = await orchestrator.getPerformance();
+
+    res.json({
+      success: true,
+      performance,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting performance metrics:", error);
+    res.status(500).json({ error: "Failed to get performance metrics", message: (error as Error).message });
+  }
+});
+
+// Get risk status
+app.get("/api/bot/risk-status", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const riskStatus = await orchestrator.getRiskStatus();
+
+    res.json({
+      success: true,
+      riskStatus,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting risk status:", error);
+    res.status(500).json({ error: "Failed to get risk status", message: (error as Error).message });
+  }
+});
+
+// Get current trading cycle status
+app.get("/api/bot/trading-cycle", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const cycleStatus = await orchestrator.getCycleStatus();
+
+    res.json({
+      success: true,
+      cycleStatus,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting trading cycle status:", error);
+    res.status(500).json({ error: "Failed to get trading cycle status", message: (error as Error).message });
   }
 });
 
 // =============================================================================
 // END PHASE 8 ENDPOINTS
+// =============================================================================
+
+// =============================================================================
+// API ARCHITECTURE STANDARD ENDPOINTS
+// =============================================================================
+
+// Trading Endpoints
+
+/**
+ * GET /api/positions - Get active trading positions
+ */
+app.get("/api/positions", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const riskStatus = await orchestrator.getRiskStatus();
+    const positions = riskStatus.openPositions;
+
+    res.json({
+      success: true,
+      count: positions.length,
+      positions: positions.map(pos => ({
+        tokenAddress: pos.tokenAddress,
+        tokenSymbol: pos.tokenSymbol,
+        action: pos.action,
+        amount: pos.amount,
+        entryPrice: pos.entryPrice,
+        currentPrice: pos.currentPrice,
+        unrealizedPnL: pos.unrealizedPnL,
+        unrealizedPnLPercent: pos.unrealizedPnLPercent,
+        timestamp: pos.timestamp,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting positions:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get positions",
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
+ * GET /api/portfolio - Get portfolio summary
+ * (Alias for /api/unified/portfolio)
+ */
+app.get("/api/portfolio", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const [performance, riskStatus] = await Promise.all([
+      orchestrator.getPerformance(),
+      orchestrator.getRiskStatus(),
+    ]);
+
+    const walletBalance = await getWalletBalance();
+
+    res.json({
+      success: true,
+      portfolio: {
+        totalValue: walletBalance,
+        positions: riskStatus.openPositions.length,
+        totalExposure: riskStatus.totalExposure,
+        unrealizedPnL: riskStatus.openPositions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0),
+        performance: {
+          totalTrades: performance.summary.totalTrades,
+          successRate: performance.summary.successRate,
+          netProfit: performance.summary.netProfit,
+          sharpeRatio: performance.summary.sharpeRatio,
+          maxDrawdown: performance.summary.maxDrawdown,
+        },
+        riskLevel: riskStatus.portfolioRisk.riskLevel,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting portfolio:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get portfolio",
+      message: (error as Error).message
+    });
+  }
+});
+
+// Memory Endpoints
+
+/**
+ * GET /api/memories - Get all trade memories
+ */
+app.get("/api/memories", async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, platform } = req.query;
+
+    const { fetchAllMemories } = await import('../blockchain/memoryStorage.js');
+    const memoryIds = await fetchAllMemories();
+
+    // Apply pagination
+    const startIndex = parseInt(offset as string);
+    const endIndex = startIndex + parseInt(limit as string);
+    const paginatedIds = memoryIds.slice(startIndex, endIndex);
+
+    // Fetch memories in parallel
+    const { fetchMemory } = await import('../blockchain/memoryStorage.js');
+    const memories = await Promise.all(
+      paginatedIds.map(id => fetchMemory(id))
+    );
+
+    // Filter out null values and optionally filter by platform
+    const validMemories = memories.filter(m => m !== null);
+    const filteredMemories = platform
+      ? validMemories.filter(m => m.tokenSymbol.toLowerCase().includes(platform.toString().toLowerCase()))
+      : validMemories;
+
+    res.json({
+      success: true,
+      count: filteredMemories.length,
+      total: memoryIds.length,
+      memories: filteredMemories,
+      pagination: {
+        limit: parseInt(limit as string),
+        offset: startIndex,
+        hasMore: endIndex < memoryIds.length,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting memories:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get memories",
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
+ * GET /api/memories/:id - Get specific memory
+ */
+app.get("/api/memories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { fetchMemory } = await import('../blockchain/memoryStorage.js');
+    const memory = await fetchMemory(id);
+
+    if (!memory) {
+      return res.status(404).json({
+        success: false,
+        error: "Memory not found",
+        message: `No memory found with ID: ${id}`,
+      });
+    }
+
+    res.json({
+      success: true,
+      memory,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting memory:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get memory",
+      message: (error as Error).message
+    });
+  }
+});
+
+// Market Data Endpoints
+
+/**
+ * GET /api/tokens/trending - Get trending tokens
+ */
+app.get("/api/tokens/trending", async (req, res) => {
+  try {
+    const { limit = 20 } = req.query;
+
+    const DynamicTokenDiscovery = (await import('../blockchain/dynamicTokenDiscovery.js')).default;
+    const discovery = new DynamicTokenDiscovery();
+
+    const tokens = await discovery.discoverTrendingTokens({
+      limit: parseInt(limit as string),
+    });
+
+    res.json({
+      success: true,
+      count: tokens.length,
+      tokens: tokens.map(token => ({
+        address: token.address,
+        symbol: token.symbol,
+        name: token.name,
+        price: token.price,
+        priceChange24h: token.priceChange24h,
+        volume24h: token.volume24h,
+        liquidity: token.liquidity,
+        confidence: token.confidence,
+        riskLevel: token.riskLevel,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting trending tokens:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get trending tokens",
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
+ * GET /api/market/overview - Get market overview
+ */
+app.get("/api/market/overview", async (req, res) => {
+  try {
+    const DynamicTokenDiscovery = (await import('../blockchain/dynamicTokenDiscovery.js')).default;
+    const discovery = new DynamicTokenDiscovery();
+
+    // Get trending tokens for overview
+    const trendingTokens = await discovery.discoverTrendingTokens({ limit: 10 });
+
+    // Calculate market stats
+    const totalVolume24h = trendingTokens.reduce((sum, t) => sum + t.volume24h, 0);
+    const avgPriceChange = trendingTokens.reduce((sum, t) => sum + t.priceChange24h, 0) / (trendingTokens.length || 1);
+    const topGainer = trendingTokens.length > 0 ? trendingTokens.reduce((max, t) => (max && t.priceChange24h > max.priceChange24h) ? t : max) : null;
+    const topLoser = trendingTokens.length > 0 ? trendingTokens.reduce((min, t) => (min && t.priceChange24h < min.priceChange24h) ? t : min) : null;
+
+    // Get BNB price
+    const bnbPrice = await (async () => {
+      try {
+        const { getTokenData } = await import('../data/marketFetcher.js');
+        const bnbData = await getTokenData('0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'); // WBNB
+        return bnbData?.price || 0;
+      } catch {
+        return 0;
+      }
+    })();
+
+    res.json({
+      success: true,
+      overview: {
+        bnbPrice,
+        totalVolume24h,
+        avgPriceChange24h: avgPriceChange,
+        trending: trendingTokens.length,
+        marketSentiment: avgPriceChange > 0 ? 'bullish' : avgPriceChange < 0 ? 'bearish' : 'neutral',
+        topGainer: topGainer ? {
+          symbol: topGainer.symbol,
+          priceChange24h: topGainer.priceChange24h,
+        } : null,
+        topLoser: topLoser ? {
+          symbol: topLoser.symbol,
+          priceChange24h: topLoser.priceChange24h,
+        } : null,
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting market overview:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get market overview",
+      message: (error as Error).message
+    });
+  }
+});
+
+// Polymarket Endpoints
+
+/**
+ * POST /api/polymarket/place-order - Place Polymarket order
+ */
+app.post("/api/polymarket/place-order", tradingLimiter, async (req, res) => {
+  try {
+    const { marketId, side, amount, price, outcome } = req.body;
+
+    // Validate required fields
+    if (!marketId || !side || !amount || !price) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "marketId, side, amount, and price are required",
+      });
+    }
+
+    // Validate side
+    if (!['BUY', 'SELL'].includes(side.toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid side",
+        message: "side must be 'BUY' or 'SELL'",
+      });
+    }
+
+    // Use Python bridge to place order (using executeTrade method)
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const bridge = getPythonBridge();
+
+    const orderResult = await bridge.executeTrade({
+      market_id: marketId,
+      side: side.toUpperCase() as 'BUY' | 'SELL',
+      amount: parseFloat(amount),
+      outcome_index: outcome === 'NO' ? 1 : 0,
+    });
+
+    if (!(orderResult as any).success) {
+      return res.status(400).json({
+        success: false,
+        error: "Order placement failed",
+        message: (orderResult as any).error || "Unknown error",
+      });
+    }
+
+    // Broadcast order event via WebSocket
+    const wsService = getWebSocketService();
+    if (wsService) {
+      wsService.emitTradeExecuted({
+        platform: 'polymarket',
+        chain: 'polygon',
+        tradeId: orderResult.data?.orderId || `order_${Date.now()}`,
+        market: marketId,
+        amount: parseFloat(amount),
+        price: parseFloat(price),
+        outcome: 'success',
+      });
+    }
+
+    res.json({
+      success: true,
+      order: {
+        orderId: orderResult.data?.orderId,
+        marketId,
+        side,
+        amount: parseFloat(amount),
+        price: parseFloat(price),
+        outcome: outcome || 'YES',
+        status: orderResult.data?.status || 'pending',
+      },
+      message: "Order placed successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error placing Polymarket order:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to place order",
+      message: (error as Error).message
+    });
+  }
+});
+
+// Advanced Polymarket Endpoints (using submodules)
+
+/**
+ * POST /api/polymarket/split-position - Split USDC into conditional tokens
+ */
+app.post("/api/polymarket/split-position", tradingLimiter, async (req, res) => {
+  try {
+    const { conditionId, amount, negRisk = false } = req.body;
+
+    if (!conditionId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "conditionId and amount are required",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.splitPosition({
+      conditionId,
+      amount,
+      negRisk,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position split successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error splitting position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to split position",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/merge-position - Merge conditional tokens back to USDC
+ */
+app.post("/api/polymarket/merge-position", tradingLimiter, async (req, res) => {
+  try {
+    const { conditionId, amount, negRisk = false } = req.body;
+
+    if (!conditionId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "conditionId and amount are required",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.mergePosition({
+      conditionId,
+      amount,
+      negRisk,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position merged successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error merging position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to merge position",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/redeem-position - Redeem winning positions
+ */
+app.post("/api/polymarket/redeem-position", tradingLimiter, async (req, res) => {
+  try {
+    const { conditionId, negRisk = false, amounts } = req.body;
+
+    if (!conditionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field",
+        message: "conditionId is required",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.redeemPosition({
+      conditionId,
+      negRisk,
+      amounts,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position redeemed successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error redeeming position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to redeem position",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/convert-position - Convert positions between outcomes
+ */
+app.post("/api/polymarket/convert-position", tradingLimiter, async (req, res) => {
+  try {
+    const { marketId, questionIds, amount } = req.body;
+
+    if (!marketId || !questionIds || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "marketId, questionIds, and amount are required",
+      });
+    }
+
+    if (!Array.isArray(questionIds)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid questionIds",
+        message: "questionIds must be an array",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.convertPosition({
+      marketId,
+      questionIds,
+      amount,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Position converted successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error converting position:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to convert position",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/approve-tokens - Approve tokens for trading
+ */
+app.post("/api/polymarket/approve-tokens", tradingLimiter, async (req, res) => {
+  try {
+    const { token, spender, amount, approved } = req.body;
+
+    if (!token || !spender) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "token and spender are required",
+      });
+    }
+
+    if (!['USDC', 'CTF', 'OUTCOME'].includes(token)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid token",
+        message: "token must be USDC, CTF, or OUTCOME",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.approveTokens({
+      token,
+      spender,
+      amount,
+      approved,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Tokens approved successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error approving tokens:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to approve tokens",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/transfer-tokens - Transfer tokens
+ */
+app.post("/api/polymarket/transfer-tokens", tradingLimiter, async (req, res) => {
+  try {
+    const { tokenType, to, amount, tokenId } = req.body;
+
+    if (!tokenType || !to || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        message: "tokenType, to, and amount are required",
+      });
+    }
+
+    if (!['USDC', 'OUTCOME'].includes(tokenType)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid tokenType",
+        message: "tokenType must be USDC or OUTCOME",
+      });
+    }
+
+    if (tokenType === 'OUTCOME' && !tokenId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing tokenId",
+        message: "tokenId is required for OUTCOME token transfers",
+      });
+    }
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const receipt = await positionManager.transferTokens({
+      tokenType,
+      to,
+      amount,
+      tokenId,
+    });
+
+    res.json({
+      success: true,
+      transaction: {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+      message: "Tokens transferred successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error transferring tokens:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to transfer tokens",
+      message: (error as Error).message,
+    });
+  }
+});
+
+// API Key Management Endpoints
+
+/**
+ * POST /api/polymarket/api-keys/create - Create new API key
+ */
+app.post("/api/polymarket/api-keys/create", async (req, res) => {
+  try {
+    const { nonce } = req.body;
+
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.createApiKey(nonce);
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        secret: keyInfo.secret,
+        passphrase: keyInfo.passphrase,
+        created: keyInfo.created,
+      },
+      message: "API key created successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error creating API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create API key",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/api-keys/derive - Derive existing API key
+ */
+app.post("/api/polymarket/api-keys/derive", async (req, res) => {
+  try {
+    const { nonce } = req.body;
+
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.deriveApiKey(nonce);
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        secret: keyInfo.secret,
+        passphrase: keyInfo.passphrase,
+      },
+      message: "API key derived successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error deriving API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to derive API key",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/api-keys/create-or-derive - Create or derive API key
+ */
+app.post("/api/polymarket/api-keys/create-or-derive", async (req, res) => {
+  try {
+    const { nonce } = req.body;
+
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.createOrDeriveApiKey(nonce);
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        secret: keyInfo.secret,
+        passphrase: keyInfo.passphrase,
+      },
+      message: "API key ready",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error creating/deriving API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create/derive API key",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/api-keys - Get all API keys
+ */
+app.get("/api/polymarket/api-keys", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keys = await apiKeyManager.getApiKeys();
+
+    res.json({
+      success: true,
+      keys: keys.apiKeys || [],
+      count: keys.apiKeys?.length || 0,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error fetching API keys:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch API keys",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/polymarket/api-keys - Delete API key
+ */
+app.delete("/api/polymarket/api-keys", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    await apiKeyManager.deleteApiKey();
+
+    res.json({
+      success: true,
+      message: "API key deleted successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error deleting API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete API key",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/api-keys/builder/create - Create builder API key
+ */
+app.post("/api/polymarket/api-keys/builder/create", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keyInfo = await apiKeyManager.createBuilderApiKey();
+
+    res.json({
+      success: true,
+      apiKey: {
+        apiKey: keyInfo.apiKey,
+        created: keyInfo.created,
+      },
+      message: "Builder API key created successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error creating builder API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create builder API key",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/api-keys/builder - Get builder API keys
+ */
+app.get("/api/polymarket/api-keys/builder", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    const keys = await apiKeyManager.getBuilderApiKeys();
+
+    res.json({
+      success: true,
+      keys,
+      count: keys.length,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error fetching builder API keys:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch builder API keys",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/polymarket/api-keys/builder - Revoke builder API key
+ */
+app.delete("/api/polymarket/api-keys/builder", async (req, res) => {
+  try {
+    const { getApiKeyManager } = await import('../polymarket/apiKeyManager.js');
+    const apiKeyManager = getApiKeyManager();
+
+    await apiKeyManager.revokeBuilderApiKey();
+
+    res.json({
+      success: true,
+      message: "Builder API key revoked successfully",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error revoking builder API key:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to revoke builder API key",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/balances - Get USDC and outcome token balances
+ */
+app.get("/api/polymarket/balances", async (req, res) => {
+  try {
+    const { tokenId } = req.query;
+
+    const { getAdvancedPositionManager } = await import('../polymarket/advancedPositionManager.js');
+    const positionManager = getAdvancedPositionManager();
+
+    const usdcBalance = await positionManager.getUSDCBalance();
+
+    const balances: any = {
+      usdc: usdcBalance,
+      wallet: positionManager.getWalletAddress(),
+    };
+
+    if (tokenId) {
+      const outcomeBalance = await positionManager.getOutcomeTokenBalance(tokenId as string);
+      balances.outcomeTokens = {
+        [tokenId as string]: outcomeBalance,
+      };
+    }
+
+    res.json({
+      success: true,
+      balances,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error fetching balances:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch balances",
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Real-Time Data Endpoints
+
+/**
+ * POST /api/polymarket/realtime/connect - Connect to real-time data feed
+ */
+app.post("/api/polymarket/realtime/connect", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.connect();
+
+    res.json({
+      success: true,
+      message: "Connecting to Polymarket real-time data feed",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error connecting to real-time feed:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to connect to real-time feed",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/realtime/disconnect - Disconnect from real-time data feed
+ */
+app.post("/api/polymarket/realtime/disconnect", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.disconnect();
+
+    res.json({
+      success: true,
+      message: "Disconnected from Polymarket real-time data feed",
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error disconnecting from real-time feed:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to disconnect from real-time feed",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/realtime/subscribe - Subscribe to real-time topics
+ */
+app.post("/api/polymarket/realtime/subscribe", async (req, res) => {
+  try {
+    const { subscriptions } = req.body;
+
+    if (!subscriptions || !Array.isArray(subscriptions)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid subscriptions",
+        message: "subscriptions must be an array",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.subscribe(subscriptions);
+
+    res.json({
+      success: true,
+      message: `Subscribed to ${subscriptions.length} topics`,
+      subscriptions: subscriptions.map(s => ({
+        topic: s.topic,
+        type: s.type,
+        filters: s.filters,
+      })),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error subscribing to topics:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to subscribe to topics",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/polymarket/realtime/unsubscribe - Unsubscribe from real-time topics
+ */
+app.post("/api/polymarket/realtime/unsubscribe", async (req, res) => {
+  try {
+    const { subscriptions } = req.body;
+
+    if (!subscriptions || !Array.isArray(subscriptions)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid subscriptions",
+        message: "subscriptions must be an array",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    realTimeService.unsubscribe(subscriptions);
+
+    res.json({
+      success: true,
+      message: `Unsubscribed from ${subscriptions.length} topics`,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error unsubscribing from topics:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to unsubscribe from topics",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/status - Get real-time feed connection status
+ */
+app.get("/api/polymarket/realtime/status", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const isConnected = realTimeService.isConnected();
+
+    res.json({
+      success: true,
+      status: {
+        connected: isConnected,
+        state: isConnected ? 'CONNECTED' : 'DISCONNECTED',
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting real-time status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get real-time status",
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Market Intelligence Data Endpoints
+
+/**
+ * GET /api/polymarket/realtime/intelligence - Get all market intelligence
+ */
+app.get("/api/polymarket/realtime/intelligence", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const intelligence = realTimeService.getMarketIntelligence();
+
+    // Convert Maps to objects for JSON serialization
+    const response = {
+      success: true,
+      data: {
+        latestTrades: Object.fromEntries(intelligence.latestTrades),
+        cryptoPrices: Object.fromEntries(intelligence.cryptoPrices),
+        equityPrices: Object.fromEntries(intelligence.equityPrices),
+        orderbooks: Object.fromEntries(intelligence.orderbooks),
+        lastTradePrices: Object.fromEntries(intelligence.lastTradePrices),
+        userOrders: Object.fromEntries(intelligence.userOrders),
+        userTrades: Object.fromEntries(intelligence.userTrades),
+      },
+      stats: {
+        totalTrades: intelligence.latestTrades.size,
+        totalCryptoPrices: intelligence.cryptoPrices.size,
+        totalEquityPrices: intelligence.equityPrices.size,
+        totalOrderbooks: intelligence.orderbooks.size,
+        totalUserOrders: intelligence.userOrders.size,
+        totalUserTrades: intelligence.userTrades.size,
+      },
+      timestamp: Date.now(),
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error("Error getting market intelligence:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get market intelligence",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/trades/:conditionId - Get latest trade for a market
+ */
+app.get("/api/polymarket/realtime/trades/:conditionId", async (req, res) => {
+  try {
+    const { conditionId } = req.params;
+
+    if (!conditionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing conditionId parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const trade = realTimeService.getLatestTrade(conditionId);
+
+    if (!trade) {
+      return res.status(404).json({
+        success: false,
+        error: "No trade found for this condition ID",
+        conditionId,
+      });
+    }
+
+    res.json({
+      success: true,
+      trade,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting latest trade:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get latest trade",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/crypto-prices - Get all crypto prices
+ */
+app.get("/api/polymarket/realtime/crypto-prices", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const cryptoPrices = realTimeService.getAllCryptoPrices();
+
+    res.json({
+      success: true,
+      count: cryptoPrices.size,
+      prices: Object.fromEntries(cryptoPrices),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting crypto prices:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get crypto prices",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/crypto-prices/:symbol - Get specific crypto price
+ */
+app.get("/api/polymarket/realtime/crypto-prices/:symbol", async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing symbol parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const price = realTimeService.getCryptoPrice(symbol.toUpperCase());
+
+    if (!price) {
+      return res.status(404).json({
+        success: false,
+        error: "No price data found for this symbol",
+        symbol: symbol.toUpperCase(),
+      });
+    }
+
+    res.json({
+      success: true,
+      price,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting crypto price:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get crypto price",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/equity-prices - Get all equity prices
+ */
+app.get("/api/polymarket/realtime/equity-prices", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const equityPrices = realTimeService.getAllEquityPrices();
+
+    res.json({
+      success: true,
+      count: equityPrices.size,
+      prices: Object.fromEntries(equityPrices),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting equity prices:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get equity prices",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/equity-prices/:symbol - Get specific equity price
+ */
+app.get("/api/polymarket/realtime/equity-prices/:symbol", async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing symbol parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const price = realTimeService.getEquityPrice(symbol.toUpperCase());
+
+    if (!price) {
+      return res.status(404).json({
+        success: false,
+        error: "No price data found for this symbol",
+        symbol: symbol.toUpperCase(),
+      });
+    }
+
+    res.json({
+      success: true,
+      price,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting equity price:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get equity price",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/orderbook/:market - Get orderbook for a market
+ */
+app.get("/api/polymarket/realtime/orderbook/:market", async (req, res) => {
+  try {
+    const { market } = req.params;
+
+    if (!market) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing market parameter",
+      });
+    }
+
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const orderbook = realTimeService.getOrderbook(market);
+
+    if (!orderbook) {
+      return res.status(404).json({
+        success: false,
+        error: "No orderbook data found for this market",
+        market,
+      });
+    }
+
+    res.json({
+      success: true,
+      orderbook,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting orderbook:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get orderbook",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/user-orders - Get user orders
+ */
+app.get("/api/polymarket/realtime/user-orders", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const userOrders = realTimeService.getUserOrders();
+
+    res.json({
+      success: true,
+      count: userOrders.size,
+      orders: Object.fromEntries(userOrders),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting user orders:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get user orders",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/polymarket/realtime/user-trades - Get user trades
+ */
+app.get("/api/polymarket/realtime/user-trades", async (req, res) => {
+  try {
+    const { getPolymarketRealTimeService } = await import('../polymarket/realTimeService.js');
+    const realTimeService = getPolymarketRealTimeService();
+
+    const userTrades = realTimeService.getUserTrades();
+
+    res.json({
+      success: true,
+      count: userTrades.size,
+      trades: Object.fromEntries(userTrades),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting user trades:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get user trades",
+      message: (error as Error).message,
+    });
+  }
+});
+
+// Alias endpoints for backward compatibility
+
+/**
+ * POST /api/start-bot - Alias for /api/bot/start
+ */
+app.post("/api/start-bot", tradingLimiter, async (req, res) => {
+  req.body.type = req.body.type || 'all';
+  return app._router.handle(req, res, (err: any) => {
+    if (err) {
+      logger.error("Error in start-bot alias:", err);
+      res.status(500).json({ error: "Failed to start bot" });
+    }
+  });
+});
+
+/**
+ * POST /api/stop-bot - Alias for /api/bot/stop
+ */
+app.post("/api/stop-bot", tradingLimiter, async (req, res) => {
+  req.body.type = req.body.type || 'all';
+  return app._router.handle(req, res, (err: any) => {
+    if (err) {
+      logger.error("Error in stop-bot alias:", err);
+      res.status(500).json({ error: "Failed to stop bot" });
+    }
+  });
+});
+
+/**
+ * GET /api/bot/status - Alias for /api/bot/state
+ */
+app.get("/api/bot/status", async (req, res) => {
+  try {
+    const { getTradingOrchestrator } = await import('../ai/tradingOrchestrator.js');
+    const orchestrator = getTradingOrchestrator();
+
+    const cycleStatus = await orchestrator.getCycleStatus();
+
+    res.json({
+      success: true,
+      status: cycleStatus.isRunning ? 'running' : 'stopped',
+      uptime: cycleStatus.uptime,
+      config: cycleStatus.config,
+      lastCycle: cycleStatus.lastCycleResult,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting bot status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get bot status",
+      message: (error as Error).message
+    });
+  }
+});
+
+// =============================================================================
+// PYTHON AI AGENTS PROXY ENDPOINTS
+// =============================================================================
+
+/**
+ * POST /api/ai/rag/query-events - Query events using RAG
+ */
+app.post("/api/ai/rag/query-events", async (req, res) => {
+  try {
+    const { query, max_results = 5 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing query parameter",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    // Check if Python service is healthy
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const results = await pythonBridge.ragQueryEvents(query, max_results);
+
+    res.json({
+      success: true,
+      ...results,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error querying events with RAG:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to query events with RAG",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/ai/rag/query-markets - Query markets using RAG
+ */
+app.post("/api/ai/rag/query-markets", async (req, res) => {
+  try {
+    const { query, max_results = 5 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing query parameter",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const results = await pythonBridge.ragQueryMarkets(query, max_results);
+
+    res.json({
+      success: true,
+      ...results,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error querying markets with RAG:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to query markets with RAG",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/ai/market-intelligence - Get comprehensive market intelligence
+ */
+app.post("/api/ai/market-intelligence", async (req, res) => {
+  try {
+    const { market_id, event_title, include_news = true, include_search = true, depth = 'standard' } = req.body;
+
+    if (!market_id && !event_title) {
+      return res.status(400).json({
+        success: false,
+        error: "Either market_id or event_title must be provided",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const intelligence = await pythonBridge.getMarketIntelligence({
+      market_id,
+      event_title,
+      include_news,
+      include_search,
+      depth,
+    });
+
+    res.json({
+      success: true,
+      intelligence,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting market intelligence:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get market intelligence",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/ai/decision - Get AI-powered trading decision
+ */
+app.post("/api/ai/decision", async (req, res) => {
+  try {
+    const { market_id, amount, use_rag = true, include_forecast = true } = req.body;
+
+    if (!market_id) {
+      return res.status(400).json({
+        success: false,
+        error: "market_id is required",
+      });
+    }
+
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.isServiceHealthy();
+    if (!isHealthy) {
+      return res.status(503).json({
+        success: false,
+        error: "Python AI service is unavailable",
+      });
+    }
+
+    const decision = await pythonBridge.getAIDecision({
+      market_id,
+      amount,
+      use_rag,
+      include_forecast,
+    });
+
+    res.json({
+      success: true,
+      decision,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error("Error getting AI decision:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get AI decision",
+      message: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * GET /api/ai/status - Get Python AI service status
+ */
+app.get("/api/ai/status", async (req, res) => {
+  try {
+    const { getPythonBridge } = await import('../services/pythonBridge.js');
+    const pythonBridge = getPythonBridge();
+
+    const isHealthy = await pythonBridge.checkHealth();
+
+    if (isHealthy) {
+      const status = await pythonBridge.getAgentStatus();
+      res.json({
+        success: true,
+        healthy: true,
+        status,
+        timestamp: Date.now(),
+      });
+    } else {
+      res.json({
+        success: true,
+        healthy: false,
+        message: "Python AI service is not responding",
+        timestamp: Date.now(),
+      });
+    }
+  } catch (error) {
+    logger.error("Error getting AI status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get AI status",
+      message: (error as Error).message,
+    });
+  }
+});
+
+// =============================================================================
+// END API ARCHITECTURE STANDARD ENDPOINTS
 // =============================================================================

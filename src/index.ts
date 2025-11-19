@@ -15,6 +15,7 @@
 
 import 'reflect-metadata';
 import { logger } from './utils/logger';
+import { logTradeEvent, logAIDecision, logErrorWithContext, logPerformance } from './monitoring/logging';
 import { CONFIG } from './config';
 import { ImmortalAIAgent } from './ai/immortalAgent';
 import { startAPIServer } from './api/server';
@@ -26,7 +27,13 @@ import { CrossChainArbitrageEngine } from './ai/crossChainStrategy';
 import { StrategyEvolutionEngine } from './ai/strategyEvolution';
 import handleError from './utils/errorHandler';
 import { validateTradeAmount } from './utils/safeguards';
+import { BotState } from './bot-state';
 import { ethers } from 'ethers';
+import { recordTrade, recordAIDecision } from './monitoring/metrics';
+import { tradeRepository } from './db/repositories/tradeRepository';
+import { withSpan } from './monitoring/tracing';
+import { dexscreenerCircuitBreaker, openRouterCircuitBreaker, blockchainCircuitBreaker } from './resilience/circuitBreaker';
+import { networkRetryPolicy } from './resilience/retryPolicy';
 
 // Global provider and wallet
 let provider: ethers.JsonRpcProvider;
@@ -158,8 +165,22 @@ async function invokeAgent(tokenAddress: string) {
     // Get wallet balance
     const walletBalance = await getWalletBalance();
 
-    // Get token data from DexScreener
-    const tokenData = await getTokenData(tokenAddress);
+    // Get token data from DexScreener with circuit breaker and retry
+    const tokenData = await withSpan('fetch-token-data', async (span) => {
+      span.setAttribute('token.address', tokenAddress);
+      
+      return await dexscreenerCircuitBreaker.execute(
+        () => networkRetryPolicy.execute(
+          () => getTokenData(tokenAddress),
+          'fetch-token-data'
+        ),
+        async () => {
+          logger.warn(`DexScreener unavailable for ${tokenAddress}`);
+          return null;
+        }
+      );
+    });
+    
     if (!tokenData) {
       logger.warn(`Could not fetch data for ${tokenAddress}`);
       return;
@@ -167,8 +188,39 @@ async function invokeAgent(tokenAddress: string) {
 
     logger.info(`📊 Token: ${tokenData.symbol} - Price: $${tokenData.priceUsd} - Volume: $${tokenData.volume24h.toLocaleString()}`);
 
-    // Use immortal AI agent for decision making
-    const aiDecision = await immortalAgent.makeDecision(tokenAddress, tokenData, walletBalance);
+    // Use immortal AI agent for decision making with circuit breaker
+    const aiDecision = await withSpan('ai-decision', async (span) => {
+      span.setAttribute('token.address', tokenAddress);
+      span.setAttribute('token.symbol', tokenData.symbol);
+      
+      return await openRouterCircuitBreaker.execute(
+        () => immortalAgent.makeDecision(tokenAddress, tokenData, walletBalance),
+        async () => {
+          // Fallback: conservative HOLD decision
+          return {
+            action: 'HOLD' as const,
+            amount: 0,
+            confidence: 0,
+            reasoning: 'AI service unavailable - holding position',
+            strategy: 'conservative',
+            riskLevel: 'LOW' as const,
+          };
+        }
+      );
+    });
+    
+    // Record AI decision metrics
+    recordAIDecision('immortal', 'pancakeswap', aiDecision.action, aiDecision.confidence);
+    
+    // Structured logging
+    logAIDecision({
+      tokenAddress,
+      tokenSymbol: tokenData.symbol,
+      action: aiDecision.action,
+      confidence: aiDecision.confidence,
+      reasoning: aiDecision.reasoning,
+      strategy: aiDecision.strategy,
+    });
     
     logger.info(`🧠 Immortal AI Decision: ${aiDecision.action} ${aiDecision.amount.toFixed(4)} BNB (${(aiDecision.confidence * 100).toFixed(1)}%)`);
     logger.info(`📝 AI Reasoning: ${aiDecision.reasoning}`);
@@ -196,7 +248,35 @@ async function invokeAgent(tokenAddress: string) {
 
         logger.info(`� Executing immortal AI trade: ${tradeParams.action} ${tradeParams.amountBNB.toFixed(4)} BNB`);
         
-        const tradeResult = await executeTrade(tradeParams);
+        // Execute trade with tracing and circuit breaker
+        const tradeStartTime = Date.now();
+        const tradeResult = await withSpan('execute-trade', async (span) => {
+          span.setAttribute('token.address', tokenAddress);
+          span.setAttribute('token.symbol', tokenData.symbol);
+          span.setAttribute('action', tradeParams.action);
+          span.setAttribute('amount', tradeParams.amountBNB);
+          
+          return await blockchainCircuitBreaker.execute(
+            () => executeTrade(tradeParams),
+            async () => {
+              // Fallback: return failure
+              return {
+                success: false,
+                amountIn: tradeParams.amountBNB.toString(),
+                amountOut: '0',
+                actualPrice: 0,
+                error: 'Circuit breaker is OPEN - blockchain unavailable'
+              };
+            }
+          );
+        });
+        
+        const tradeDuration = Date.now() - tradeStartTime;
+        logPerformance('trade-execution', tradeDuration, {
+          token: tokenData.symbol,
+          action: tradeParams.action,
+          success: tradeResult.success,
+        });
         
         if (tradeResult.success) {
           // Update active positions
@@ -210,6 +290,64 @@ async function invokeAgent(tokenAddress: string) {
           } else {
             activePositions.delete(tokenAddress);
           }
+
+          // Store trade in database
+          try {
+            await tradeRepository.create({
+              tokenAddress,
+              tokenSymbol: tokenData.symbol,
+              action: tradeParams.action,
+              amountBNB: tradeParams.amountBNB.toString(),
+              amountTokens: tradeResult.amountOut || '0',
+              entryPrice: parseFloat(tokenData.priceUsd).toString(),
+              actualPrice: tradeResult.actualPrice?.toString(),
+              txHash: tradeResult.txHash,
+              gasUsed: tradeResult.gasUsed,
+              slippagePercent: tradeParams.slippagePercent || 2,
+              outcome: 'pending',
+              confidence: aiDecision.confidence,
+              strategy: aiDecision.strategy,
+              riskLevel: aiDecision.riskLevel,
+              aiReasoning: aiDecision.reasoning,
+              marketConditions: {
+                volume24h: tokenData.volume24h,
+                liquidity: tokenData.liquidity,
+                priceChange24h: tokenData.priceChange24h,
+                buySellPressure: calculateBuySellPressure(tokenData)
+              },
+              platform: 'pancakeswap',
+              chain: CONFIG.TRADING_NETWORK,
+            });
+          } catch (dbError) {
+            logger.warn('Failed to store trade in database:', dbError);
+            // Continue - database is not critical
+          }
+
+          // Log trade to BotState
+          BotState.addTradeLog({
+            id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            token: tokenAddress,
+            tokenSymbol: tokenData.symbol,
+            action: tradeParams.action,
+            amount: tradeParams.amountBNB,
+            price: parseFloat(tokenData.priceUsd),
+            status: 'success',
+            txHash: tradeResult.txHash
+          });
+
+          // Record metrics
+          recordTrade('pancakeswap', 'success', 0); // P&L calculated later
+          
+          // Structured logging
+          logTradeEvent('executed', {
+            tokenAddress,
+            tokenSymbol: tokenData.symbol,
+            action: tradeParams.action,
+            amount: tradeParams.amountBNB,
+            price: parseFloat(tokenData.priceUsd),
+            txHash: tradeResult.txHash,
+          });
 
           // Alert successful trade
           await alertTradeExecution(tradeResult, tokenData.symbol, tradeParams.action);
@@ -239,6 +377,19 @@ async function invokeAgent(tokenAddress: string) {
           logger.info(`🧠 Trade memory stored in immortal storage`);
           
         } else {
+          // Log failed trade to BotState
+          BotState.addTradeLog({
+            id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            token: tokenAddress,
+            tokenSymbol: tokenData.symbol,
+            action: tradeParams.action,
+            amount: tradeParams.amountBNB,
+            price: parseFloat(tokenData.priceUsd),
+            status: 'failed',
+            error: tradeResult.error
+          });
+          
           logger.error(`❌ Trade execution failed: ${tradeResult.error}`);
         }
         
@@ -271,12 +422,20 @@ async function invokeAgent(tokenAddress: string) {
  * Main loop - check markets periodically
  */
 async function main() {
-  logger.info('🚀 Starting Immortal AI Trading Bot...');
+  // Check if bot is running (frontend-controlled)
+  if (!BotState.isRunning()) {
+    logger.debug('⏸️  Bot is not running (waiting for frontend to start)');
+    return;
+  }
+
+  logger.info('🚀 Starting Immortal AI Trading Bot cycle...');
   logger.info('📍 Network: BNB Chain ' + (CONFIG.NETWORK === 'mainnet' ? 'MAINNET' : 'TESTNET'));
 
-  // Initialize
-  await initializeProvider();
-  initializeTelegramBot();
+  // Initialize if not already done
+  if (!provider) {
+    await initializeProvider();
+    initializeTelegramBot();
+  }
 
   const balance = await getWalletBalance();
   logger.info(`💰 Wallet Balance: ${balance.toFixed(4)} BNB`);
@@ -285,10 +444,9 @@ async function main() {
     logger.warn('⚠️  Low balance! Get testnet BNB from https://testnet.bnbchain.org/faucet-smart');
   }
 
-  await alertBotStatus('started', `Bot started with ${balance.toFixed(4)} BNB balance`);
-
-  // Get trending tokens or use watchlist
-  let tokensToWatch = CONFIG.DEFAULT_WATCHLIST;
+  // Get tokens from BotState config or fallback to defaults
+  const botConfig = BotState.getConfig();
+  let tokensToWatch = botConfig?.tokens || CONFIG.DEFAULT_WATCHLIST;
 
   if (tokensToWatch.length === 0) {
     logger.info('📈 Fetching trending tokens...');
@@ -299,6 +457,12 @@ async function main() {
 
   // Analyze each token
   for (const tokenAddress of tokensToWatch) {
+    // Check again if bot is still running (user might have stopped it)
+    if (!BotState.isRunning()) {
+      logger.info('⏸️  Bot stopped during cycle');
+      break;
+    }
+
     try {
       await invokeAgent(tokenAddress);
 
@@ -320,13 +484,28 @@ async function startBot() {
   // Start API server for frontend communication
   startAPIServer();
 
-  // Run immediately
-  await main();
+  // Initialize provider once
+  await initializeProvider();
+  initializeTelegramBot();
 
-  // Then run on interval
-  setInterval(async () => {
-    await main();
+  const balance = await getWalletBalance();
+  logger.info(`💰 Wallet Balance: ${balance.toFixed(4)} BNB`);
+  await alertBotStatus('started', `Bot initialized with ${balance.toFixed(4)} BNB balance`);
+
+  // Run trading loop on interval (checks BotState.isRunning() inside)
+  const intervalId = setInterval(async () => {
+    try {
+      await main();
+    } catch (error) {
+      logger.error(`Error in trading loop: ${(error as Error).message}`);
+    }
   }, CONFIG.BOT_LOOP_INTERVAL_MS);
+
+  // Store interval ID in BotState for cleanup
+  BotState.setIntervalId(intervalId);
+
+  logger.info('✅ Bot loop started - waiting for frontend to start trading');
+  logger.info('   Use the frontend dashboard to start/stop the bot');
 }
 
 // Handle graceful shutdown

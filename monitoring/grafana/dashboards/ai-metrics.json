@@ -1,0 +1,63 @@
+{
+  "dashboard": {
+    "title": "AI Metrics Dashboard",
+    "tags": ["ai", "decisions"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "AI Decisions Over Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(ai_decisions_total[5m])) by (agent_type, decision)",
+            "legendFormat": "{{agent_type}} - {{decision}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Decision Confidence Distribution",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(ai_decision_confidence_bucket[5m])) by (le, agent_type))",
+            "legendFormat": "{{agent_type}} p95"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Average Confidence by Agent",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "avg(ai_decision_confidence) by (agent_type)",
+            "legendFormat": "{{agent_type}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Decisions by Type",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (decision) (ai_decisions_total)",
+            "legendFormat": "{{decision}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      }
+    ],
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+  }
+}
+

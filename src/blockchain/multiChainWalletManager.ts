@@ -166,7 +166,9 @@ export class MultiChainWalletManager {
     try {
       const provider = this.getProvider(chain);
       const tokenAbi = ['function balanceOf(address) view returns (uint256)'];
-      const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider);
+      const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider) as ethers.Contract & {
+        balanceOf: (address: string) => Promise<bigint>;
+      };
 
       const balance = await tokenContract.balanceOf(this.wallet.address);
       return parseFloat(ethers.formatUnits(balance, decimals));
@@ -199,7 +201,9 @@ export class MultiChainWalletManager {
     try {
       const wallet = this.getWallet(chain);
       const tokenAbi = ['function approve(address spender, uint256 amount) returns (bool)'];
-      const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, wallet);
+      const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, wallet) as ethers.Contract & {
+        approve: (spender: string, amount: bigint) => Promise<ethers.ContractTransactionResponse>;
+      };
 
       logger.info(`Approving ${amount} tokens for ${spender} on ${chain}...`);
 
@@ -252,7 +256,9 @@ export class MultiChainWalletManager {
     try {
       const wallet = this.getWallet(chain);
       const tokenAbi = ['function transfer(address to, uint256 amount) returns (bool)'];
-      const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, wallet);
+      const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, wallet) as ethers.Contract & {
+        transfer: (to: string, amount: bigint) => Promise<ethers.ContractTransactionResponse>;
+      };
 
       logger.info(`Transferring ${amount} tokens to ${to} on ${chain}...`);
 

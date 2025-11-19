@@ -7,10 +7,17 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
 import { logger } from './utils/logger';
+import { structuredLogger, logWithContext, getCorrelationId, setCorrelationId, logErrorWithContext } from './monitoring/logging';
 import { fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
 import { getTrendingTokens } from './data/marketFetcher';
 import { CONFIG } from './config';
 import { BotState } from './bot-state';
+import { metricsMiddleware, register } from './monitoring/metrics';
+import { healthChecker } from './health/healthChecker';
+import { initializeTracing, withSpan } from './monitoring/tracing';
+import { cacheManager } from './cache/cacheManager';
+import { tradeRepository } from './db/repositories/tradeRepository';
+import { configRepository } from './db/repositories/configRepository';
 
 // Import middleware
 import {
@@ -48,9 +55,34 @@ app.use(express.json());
 // Request sanitization (XSS protection)
 app.use(sanitizeRequest);
 
-// Request logging
+// Initialize tracing in production
+if (process.env.NODE_ENV === 'production' && process.env.ENABLE_TRACING !== 'false') {
+  initializeTracing();
+}
+
+// Initialize Redis cache
+if (process.env.REDIS_URL) {
+  cacheManager.warmCache().catch((err) => {
+    logger.warn('Cache warm-up failed:', err);
+  });
+}
+
+// Correlation ID middleware
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
+  const correlationId = req.headers['x-correlation-id'] as string || getCorrelationId();
+  setCorrelationId(correlationId);
+  res.setHeader('X-Correlation-ID', correlationId);
+  next();
+});
+
+// Metrics middleware (must be before routes)
+app.use(metricsMiddleware);
+
+// Structured request logging
+app.use((req, res, next) => {
+  logWithContext('info', `${req.method} ${req.path}`, {
+    method: req.method,
+    path: req.path,
     ip: req.ip,
     userAgent: req.get('user-agent'),
   });
@@ -89,7 +121,23 @@ app.post(
         network: CONFIG.NETWORK as 'testnet' | 'mainnet',
       });
 
-      logger.info(`✅ Bot started via API`, {
+      // Store bot state in database
+      try {
+        await configRepository.update({
+          isRunning: true,
+          riskLevel: risk,
+          maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
+          stopLoss: CONFIG.STOP_LOSS_PERCENTAGE,
+          interval: CONFIG.BOT_LOOP_INTERVAL_MS,
+          network: CONFIG.NETWORK,
+          watchlist: validTokens,
+        });
+      } catch (dbError) {
+        logger.warn('Failed to store bot state in database:', dbError);
+        // Continue - database is not critical for bot operation
+      }
+
+      logWithContext('info', 'Bot started via API', {
         tokenCount: validTokens.length,
         risk,
         network: CONFIG.NETWORK,
@@ -129,7 +177,15 @@ app.post('/api/stop-bot', botControlLimiter, async (req: Request, res: Response)
     }
 
     BotState.stop();
-    logger.info('🛑 Bot stopped via API');
+    
+    // Update database
+    try {
+      await configRepository.setRunning(false);
+    } catch (dbError) {
+      logger.warn('Failed to update bot state in database:', dbError);
+    }
+    
+    logWithContext('info', 'Bot stopped via API', {});
 
     res.json({
       status: 'stopped',
@@ -232,7 +288,20 @@ app.get(
   async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
-      const logs = BotState.getTradeLogs(limit);
+      
+      // Try database first, fallback to BotState
+      let logs;
+      try {
+        logs = await tradeRepository.query({
+          limit,
+          offset: parseInt(req.query.offset as string) || 0,
+          tokenAddress: req.query.tokenAddress as string,
+        });
+      } catch (dbError) {
+        // Fallback to BotState if database unavailable
+        logger.warn('Database unavailable, using BotState:', dbError);
+        logs = BotState.getTradeLogs(limit);
+      }
 
       res.json({
         total: logs.length,
@@ -350,9 +419,11 @@ app.get('/api/analytics', readLimiter, async (req: Request, res: Response) => {
     completedTrades
       .sort((a, b) => a.timestamp - b.timestamp)
       .forEach(trade => {
-        cumulativeProfit += trade.profitLoss || 0;
-        const date = new Date(trade.timestamp).toISOString().split('T')[0];
-        profitTimeline.push({ date, profit: cumulativeProfit });
+        cumulativeProfit += (trade.profitLoss || 0);
+        const dateStr = new Date(trade.timestamp).toISOString().split('T')[0];
+        if (dateStr) {
+          profitTimeline.push({ date: dateStr, profit: cumulativeProfit });
+        }
       });
 
     // Trade distribution
@@ -469,7 +540,11 @@ app.post('/api/positions/:id/close', botControlLimiter, async (req: Request, res
     const { id } = req.params;
 
     // Close position via BotState
-    const result = await BotState.closePosition(id);
+    const positionId = id || '';
+    if (!positionId) {
+      return res.status(400).json({ error: 'Position ID is required' });
+    }
+    const result = await BotState.closePosition(positionId);
 
     if (!result.success) {
       return res.status(400).json({ error: result.error });

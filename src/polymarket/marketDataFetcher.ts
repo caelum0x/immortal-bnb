@@ -5,7 +5,8 @@
  * Provides structured data for AI decision-making
  */
 
-import { polymarketService, MarketInfo, OrderBook } from './polymarketClient';
+import { polymarketService } from './polymarketClient';
+import type { MarketInfo, OrderBook } from './polymarketClient';
 import { logger } from '../utils/logger';
 
 export interface MarketOpportunity {
@@ -113,8 +114,12 @@ export class PolymarketDataFetcher {
       }
 
       // Calculate metrics
-      const bestBid = orderbook.bids[0].price;
-      const bestAsk = orderbook.asks[0].price;
+      const bestBid = orderbook.bids?.[0]?.price;
+      const bestAsk = orderbook.asks?.[0]?.price;
+      
+      if (!bestBid || !bestAsk) {
+        throw new Error('Invalid orderbook data');
+      }
       const midPrice = (bestBid + bestAsk) / 2;
       const spread = bestAsk - bestBid;
       const spreadPercent = (spread / midPrice) * 100;
