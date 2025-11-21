@@ -10,6 +10,9 @@ async function main() {
 
   // Get signer
   const [signer] = await ethers.getSigners();
+  if (!signer) {
+    throw new Error("No signer account found");
+  }
   console.log(`Using account: ${signer.address}`);
 
   const balance = await ethers.provider.getBalance(signer.address);
@@ -36,11 +39,21 @@ async function main() {
   console.log("📊 Token Information");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-  const name = await token.name();
-  const symbol = await token.symbol();
-  const decimals = await token.decimals();
-  const totalSupply = await token.totalSupply();
-  const userBalance = await token.balanceOf(signer.address);
+  const nameMethod = token.name;
+  const symbolMethod = token.symbol;
+  const decimalsMethod = token.decimals;
+  const totalSupplyMethod = token.totalSupply;
+  const balanceOfMethod = token.balanceOf;
+  
+  if (!nameMethod || !symbolMethod || !decimalsMethod || !totalSupplyMethod || !balanceOfMethod) {
+    throw new Error("Token contract methods not available");
+  }
+  
+  const name = await nameMethod();
+  const symbol = await symbolMethod();
+  const decimals = await decimalsMethod();
+  const totalSupply = await totalSupplyMethod();
+  const userBalance = await balanceOfMethod(signer.address);
 
   console.log(`Name: ${name}`);
   console.log(`Symbol: ${symbol}`);
@@ -52,40 +65,63 @@ async function main() {
   console.log("🏦 Staking Information");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-  const totalStaked = await staking.totalStaked();
-  const rewardPool = await staking.rewardPool();
-  const minStake = await staking.MIN_STAKE();
+  const totalStakedMethod = staking.totalStaked;
+  const rewardPoolMethod = staking.rewardPool;
+  const minStakeMethod = staking.MIN_STAKE;
+  
+  if (!totalStakedMethod || !rewardPoolMethod || !minStakeMethod) {
+    throw new Error("Staking contract methods not available");
+  }
+  
+  const totalStaked = await totalStakedMethod();
+  const rewardPool = await rewardPoolMethod();
+  const minStake = await minStakeMethod();
 
   console.log(`Total Staked: ${ethers.formatEther(totalStaked)} ${symbol}`);
   console.log(`Reward Pool: ${ethers.formatEther(rewardPool)} ${symbol}`);
   console.log(`Minimum Stake: ${ethers.formatEther(minStake)} ${symbol}\n`);
 
   console.log("Staking Tiers:");
-  for (let i = 0; i < 4; i++) {
-    try {
-      const tier = await staking.tiers(i);
-      const durationDays = Number(tier.duration) / 86400;
-      const apy = Number(tier.apyBasisPoints) / 100;
-      console.log(
-        `  Tier ${i}: ${durationDays} days - ${apy}% APY${tier.active ? " ✅" : " ❌"}`
-      );
-    } catch {
-      break;
+  const tiersMethod = staking.tiers;
+  if (tiersMethod) {
+    for (let i = 0; i < 4; i++) {
+      try {
+        const tier = await tiersMethod(i);
+        const durationDays = Number(tier.duration) / 86400;
+        const apy = Number(tier.apyBasisPoints) / 100;
+        console.log(
+          `  Tier ${i}: ${durationDays} days - ${apy}% APY${tier.active ? " ✅" : " ❌"}`
+        );
+      } catch {
+        break;
+      }
     }
   }
   console.log("");
 
   // Get user stakes
-  const userStakes = await staking.getUserStakes(signer.address);
-  const pendingRewards = await staking.getPendingRewards(signer.address);
+  const getUserStakesMethod = staking.getUserStakes;
+  const getPendingRewardsMethod = staking.getPendingRewards;
+  const calculateRewardMethod = staking.calculateReward;
+  
+  if (!getUserStakesMethod || !getPendingRewardsMethod || !calculateRewardMethod) {
+    throw new Error("Staking contract methods not available");
+  }
+  
+  const userStakes = await getUserStakesMethod(signer.address);
+  const pendingRewards = await getPendingRewardsMethod(signer.address);
 
   console.log(`Your Stakes: ${userStakes.length}`);
   if (userStakes.length > 0) {
     for (let i = 0; i < userStakes.length; i++) {
       const stake = userStakes[i];
       if (Number(stake.amount) > 0) {
-        const reward = await staking.calculateReward(signer.address, i);
-        const tier = await staking.tiers(stake.tier);
+        const reward = await calculateRewardMethod(signer.address, i);
+        const tiersMethod = staking.tiers;
+        if (!tiersMethod) {
+          throw new Error("tiers method not available");
+        }
+        const tier = await tiersMethod(stake.tier);
         const durationDays = Number(tier.duration) / 86400;
         const stakedTime = Math.floor(
           (Date.now() / 1000 - Number(stake.stakedAt)) / 86400

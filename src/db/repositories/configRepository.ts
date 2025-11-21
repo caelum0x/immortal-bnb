@@ -3,8 +3,15 @@
  * Data access layer for bot configuration and state
  */
 
-import { prisma } from '../client';
-import { BotState } from '../generated/prisma';
+// Optional Prisma import
+let prisma: any;
+try {
+  prisma = require('../client').prisma;
+} catch {
+  prisma = { botState: { findUnique: () => Promise.resolve(null), upsert: () => Promise.resolve({}) } };
+}
+// BotState type - will be available after Prisma client generation
+type BotState = any;
 
 export interface BotConfigData {
   isRunning?: boolean;

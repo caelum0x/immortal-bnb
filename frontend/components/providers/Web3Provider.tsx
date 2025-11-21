@@ -36,17 +36,33 @@ export default function Web3Provider({ children }: { children: React.ReactNode }
   // Check if wallet is already connected
   useEffect(() => {
     const checkConnection = async () => {
-      if (typeof window !== 'undefined' && window.ethereum) {
-        try {
-          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-          if (accounts.length > 0) {
-            setAddress(accounts[0]);
-            setIsConnected(true);
-            await updateWalletInfo(accounts[0]);
-          }
-        } catch (error) {
-          console.error('Failed to check wallet connection:', error);
+      if (typeof window === 'undefined') return;
+      
+      console.log('🔍 Checking for existing wallet connection...');
+      
+      if (!window.ethereum) {
+        console.log('⚠️  No wallet detected');
+        return;
+      }
+      
+      console.log('✅ Wallet detected:', {
+        isMetaMask: window.ethereum.isMetaMask,
+      });
+      
+      try {
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        console.log('📋 Existing accounts:', accounts);
+        
+        if (accounts && accounts.length > 0) {
+          setAddress(accounts[0]);
+          setIsConnected(true);
+          console.log('✅ Auto-connected to:', accounts[0]);
+          await updateWalletInfo(accounts[0]);
+        } else {
+          console.log('ℹ️  No existing connection');
         }
+      } catch (error) {
+        console.error('❌ Failed to check wallet connection:', error);
       }
     };
     
@@ -81,31 +97,64 @@ export default function Web3Provider({ children }: { children: React.ReactNode }
   };
 
   const connect = async () => {
-    if (!window.ethereum) {
-      setError('No Ethereum wallet found. Please install MetaMask.');
+    console.log('🔌 Connect wallet button clicked');
+    
+    // Check if window.ethereum exists
+    if (typeof window === 'undefined') {
+      setError('This function must be called in a browser environment.');
+      console.error('❌ window is undefined');
       return;
     }
+
+    if (!window.ethereum) {
+      const errorMsg = 'No Ethereum wallet found. Please install MetaMask or another Web3 wallet.';
+      setError(errorMsg);
+      console.error('❌', errorMsg);
+      alert(errorMsg + '\n\nDownload MetaMask: https://metamask.io/');
+      return;
+    }
+
+    console.log('✅ window.ethereum found:', {
+      isMetaMask: window.ethereum.isMetaMask,
+      selectedAddress: window.ethereum.selectedAddress,
+    });
 
     setIsConnecting(true);
     setError(null);
 
     try {
+      console.log('📡 Requesting accounts...');
       const accounts = await window.ethereum.request({ 
         method: 'eth_requestAccounts' 
       });
       
-      if (accounts.length > 0) {
+      console.log('✅ Accounts received:', accounts);
+      
+      if (accounts && accounts.length > 0) {
         setAddress(accounts[0]);
         setIsConnected(true);
+        console.log('✅ Wallet connected:', accounts[0]);
         await updateWalletInfo(accounts[0]);
+      } else {
+        const errorMsg = 'No accounts returned from wallet.';
+        setError(errorMsg);
+        console.error('❌', errorMsg);
       }
     } catch (error: any) {
+      console.error('❌ Wallet connection error:', error);
+      
       if (error.code === 4001) {
-        setError('Connection rejected by user.');
+        setError('Connection rejected by user. Please try again and approve the connection.');
+      } else if (error.code === -32002) {
+        setError('Connection request already pending. Please check your wallet.');
+      } else if (error.message) {
+        setError(`Connection failed: ${error.message}`);
       } else {
-        setError('Failed to connect wallet.');
+        setError('Failed to connect wallet. Please make sure MetaMask is installed and unlocked.');
       }
-      console.error('Failed to connect wallet:', error);
+      
+      // Show alert for better visibility
+      alert(`Wallet Connection Error:\n\n${error.message || 'Unknown error'}\n\nPlease make sure:\n1. MetaMask is installed\n2. MetaMask is unlocked\n3. You approve the connection request`);
     } finally {
       setIsConnecting(false);
     }

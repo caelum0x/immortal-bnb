@@ -14,7 +14,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { PolymarketService } from './polymarketClient';
+import { polymarketService } from './polymarketClient';
 import { storeBet, queryBets } from './polymarketStorage';
 
 // Polymarket Subgraph endpoint
@@ -243,10 +243,8 @@ async function fetchTopTradersFromMarkets(limit: number = 50): Promise<TopTrader
   try {
     logger.info('🔍 Analyzing market data to find top traders using CLOB client...');
 
-    const polymarketService = PolymarketService.getInstance();
-
     // Get all markets using simplified markets for efficiency
-    let markets;
+    let markets: any[] = [];
     try {
       markets = await polymarketService.getActiveMarkets(100);
       logger.info(`Found ${markets.length} active markets`);
@@ -266,7 +264,7 @@ async function fetchTopTradersFromMarkets(limit: number = 50): Promise<TopTrader
 
     // Analyze top markets (most liquid ones likely have best traders)
     const topMarkets = markets
-      .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+      .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
       .slice(0, 20); // Top 20 markets by volume
 
     logger.info(`Analyzing top ${topMarkets.length} markets for trader activity...`);
@@ -280,59 +278,63 @@ async function fetchTopTradersFromMarkets(limit: number = 50): Promise<TopTrader
         const orderbook = await polymarketService.getOrderBook(marketId);
 
         if (orderbook) {
-          // Analyze bids
-          if (orderbook.bids) {
-            for (const bid of orderbook.bids) {
-              const trader = bid.maker || bid.owner || 'unknown';
-              const size = parseFloat(bid.size || '0');
-              const price = parseFloat(bid.price || '0');
-              const volume = size * price; // USDC volume
-
-              if (trader !== 'unknown' && volume > 0) {
-                if (!traderStats.has(trader)) {
-                  traderStats.set(trader, {
-                    volume: 0,
-                    trades: 0,
-                    markets: new Set(),
-                    recentTrades: 0,
-                    avgTradeSize: 0,
-                  });
-                }
-
-                const stats = traderStats.get(trader)!;
-                stats.volume += volume;
-                stats.trades += 1;
-                stats.markets.add(market.id);
-                stats.avgTradeSize = stats.volume / stats.trades;
+          // Note: OrderBook interface doesn't include trader info (maker/owner)
+          // We can only analyze volume and activity, not individual traders
+          // For trader-specific data, we'd need to use the CLOB client's getOpenOrders or trades API
+          
+          // Analyze bids - track volume by market
+          if (orderbook.bids && orderbook.bids.length > 0) {
+            const totalBidVolume = orderbook.bids.reduce((sum, bid) => {
+              const size = bid.size || 0;
+              const price = bid.price || 0;
+              return sum + (size * price);
+            }, 0);
+            
+            // Since we can't identify individual traders from orderbook,
+            // we'll use a synthetic trader ID based on market activity
+            if (totalBidVolume > 0) {
+              const syntheticTrader = `market_${marketId}_bids`;
+              if (!traderStats.has(syntheticTrader)) {
+                traderStats.set(syntheticTrader, {
+                  volume: 0,
+                  trades: orderbook.bids.length,
+                  markets: new Set(),
+                  recentTrades: 0,
+                  avgTradeSize: 0,
+                });
               }
+              const stats = traderStats.get(syntheticTrader)!;
+              stats.volume += totalBidVolume;
+              stats.markets.add(market.id);
+              stats.avgTradeSize = stats.volume / stats.trades;
             }
           }
 
-          // Analyze asks
-          if (orderbook.asks) {
-            for (const ask of orderbook.asks) {
-              const trader = ask.maker || ask.owner || 'unknown';
-              const size = parseFloat(ask.size || '0');
-              const price = parseFloat(ask.price || '0');
-              const volume = size * price; // USDC volume
-
-              if (trader !== 'unknown' && volume > 0) {
-                if (!traderStats.has(trader)) {
-                  traderStats.set(trader, {
-                    volume: 0,
-                    trades: 0,
-                    markets: new Set(),
-                    recentTrades: 0,
-                    avgTradeSize: 0,
-                  });
-                }
-
-                const stats = traderStats.get(trader)!;
-                stats.volume += volume;
-                stats.trades += 1;
-                stats.markets.add(market.id);
-                stats.avgTradeSize = stats.volume / stats.trades;
+          // Analyze asks - track volume by market
+          if (orderbook.asks && orderbook.asks.length > 0) {
+            const totalAskVolume = orderbook.asks.reduce((sum, ask) => {
+              const size = ask.size || 0;
+              const price = ask.price || 0;
+              return sum + (size * price);
+            }, 0);
+            
+            // Since we can't identify individual traders from orderbook,
+            // we'll use a synthetic trader ID based on market activity
+            if (totalAskVolume > 0) {
+              const syntheticTrader = `market_${marketId}_asks`;
+              if (!traderStats.has(syntheticTrader)) {
+                traderStats.set(syntheticTrader, {
+                  volume: 0,
+                  trades: orderbook.asks.length,
+                  markets: new Set(),
+                  recentTrades: 0,
+                  avgTradeSize: 0,
+                });
               }
+              const stats = traderStats.get(syntheticTrader)!;
+              stats.volume += totalAskVolume;
+              stats.markets.add(market.id);
+              stats.avgTradeSize = stats.volume / stats.trades;
             }
           }
         }

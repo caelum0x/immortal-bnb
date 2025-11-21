@@ -244,18 +244,21 @@ export class PolymarketDataFetcher {
 
         if (maxPrice - minPrice > 0.1) {
           // Potential arbitrage opportunity
-          opportunities.push({
-            marketId: validPrices[0].market.id,
-            question: `Arbitrage: ${keyword}`,
-            signal: 'BUY',
-            confidence: 0.8,
-            currentPrice: minPrice,
-            volume: validPrices[0].market.volume,
-            liquidity: validPrices[0].market.liquidity,
-            spread: maxPrice - minPrice,
-            timeUntilClose: (validPrices[0].market.endDate.getTime() - Date.now()) / (1000 * 60 * 60),
-            reasoning: `Price discrepancy detected: ${(maxPrice - minPrice).toFixed(2)} between similar markets`,
-          });
+          const firstMarket = validPrices[0]?.market;
+          if (firstMarket) {
+            opportunities.push({
+              marketId: firstMarket.id,
+              question: `Arbitrage: ${keyword}`,
+              signal: 'BUY',
+              confidence: 0.8,
+              currentPrice: minPrice,
+              volume: firstMarket.volume || 0,
+              liquidity: firstMarket.liquidity || 0,
+              spread: maxPrice - minPrice,
+              timeUntilClose: (firstMarket.endDate?.getTime() || Date.now() - Date.now()) / (1000 * 60 * 60),
+              reasoning: `Price discrepancy detected: ${(maxPrice - minPrice).toFixed(2)} between similar markets`,
+            });
+          }
         }
       }
 

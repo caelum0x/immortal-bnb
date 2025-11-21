@@ -222,6 +222,12 @@ class BotStateManager {
       }
 
       const position = this.positions[positionIndex];
+      if (!position) {
+        return {
+          success: false,
+          error: 'Position not found'
+        };
+      }
 
       if (position.status === 'closed') {
         return {

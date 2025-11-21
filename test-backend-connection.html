@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backend Connection Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #fff; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #333; border-radius: 5px; }
+        .success { border-color: #0f0; color: #0f0; }
+        .error { border-color: #f00; color: #f00; }
+        .info { border-color: #ff0; color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>Backend Connection Test</h1>
+    <div id="results"></div>
+    <script>
+        const API_URL = 'http://localhost:3001';
+        const results = document.getElementById('results');
+        
+        async function test(endpoint, name) {
+            const div = document.createElement('div');
+            div.className = 'test';
+            div.innerHTML = `Testing ${name}...`;
+            results.appendChild(div);
+            
+            try {
+                const response = await fetch(`${API_URL}${endpoint}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    div.className = 'test success';
+                    div.innerHTML = `✅ ${name}: OK<br><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    div.className = 'test error';
+                    div.innerHTML = `❌ ${name}: HTTP ${response.status} ${response.statusText}`;
+                }
+            } catch (error) {
+                div.className = 'test error';
+                div.innerHTML = `❌ ${name}: ${error.message}`;
+            }
+        }
+        
+        async function runTests() {
+            await test('/health', 'Health Check');
+            await test('/api/bot-status', 'Bot Status');
+            await test('/api/settings', 'Settings');
+        }
+        
+        runTests();
+    </script>
+</body>
+</html>
+

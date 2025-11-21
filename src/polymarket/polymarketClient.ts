@@ -11,7 +11,7 @@ import { Wallet } from '@ethersproject/wallet';
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
-import { UnifiedPolymarketWallet, WalletType } from './unifiedWalletManager';
+import { UnifiedPolymarketWallet, type WalletType } from './unifiedWalletManager';
 
 export interface PolymarketConfig {
   host: string;

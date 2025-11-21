@@ -3,7 +3,7 @@
  * Provides caching layer for improved performance
  */
 
-import { createClient, RedisClientType } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
 import { logger } from '../utils/logger';
 
 let redisClient: RedisClientType | null = null;

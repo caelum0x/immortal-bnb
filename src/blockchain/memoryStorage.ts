@@ -32,9 +32,21 @@ if (!hasValidKey) {
   }
 }
 
-const ACCOUNT_ADDRESS = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x') 
-  ? new ethers.Wallet(ACCOUNT_PRIVATE_KEY).address 
-  : null;
+// Defer wallet creation to avoid Bun/ethers v6 compatibility issues during module load
+const ACCOUNT_ADDRESS = (() => {
+  if (!ACCOUNT_PRIVATE_KEY || ACCOUNT_PRIVATE_KEY.length <= 20 || !ACCOUNT_PRIVATE_KEY.startsWith('0x')) {
+    return null;
+  }
+  
+  // Try to create wallet, but don't fail if there's a compatibility issue
+  try {
+    return new ethers.Wallet(ACCOUNT_PRIVATE_KEY).address;
+  } catch (error) {
+    // Silently fail - wallet will be created later when needed
+    console.warn('⚠️  Could not create wallet during module load (will retry later):', (error as Error).message);
+    return null;
+  }
+})();
 
 // Initialize Greenfield client
 let client: Client;
@@ -51,12 +63,36 @@ async function initClient(): Promise<Client> {
 }
 
 /**
+ * Get account address (lazy initialization)
+ */
+function getAccountAddress(): string | null {
+  if (ACCOUNT_ADDRESS) {
+    return ACCOUNT_ADDRESS;
+  }
+  
+  // Try to create wallet if we have a valid key
+  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  if (!isTestWallet) {
+    return null;
+  }
+  
+  try {
+    const normalizedKey = ACCOUNT_PRIVATE_KEY.startsWith('0x') ? ACCOUNT_PRIVATE_KEY : `0x${ACCOUNT_PRIVATE_KEY}`;
+    const wallet = new ethers.Wallet(normalizedKey);
+    return wallet.address;
+  } catch (error) {
+    logger.warn(`⚠️  Could not create wallet for memory storage: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
  * Helper: Create bucket if it doesn't exist (public read for simplicity)
  */
 async function ensureBucketExists(): Promise<void> {
-  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  const accountAddress = getAccountAddress();
   
-  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+  if (!accountAddress) {
     throw new Error('Cannot create bucket: No valid wallet configured');
   }
 
@@ -78,13 +114,18 @@ async function ensureBucketExists(): Promise<void> {
     const greenfieldClient = await initClient();
 
     // If not exists, create bucket
+    const accountAddress = getAccountAddress();
+    if (!accountAddress) {
+      throw new Error('Cannot create bucket: No valid wallet configured');
+    }
+    
     const createBucketTx = await greenfieldClient.bucket.createBucket({
       bucketName: BUCKET_NAME,
-      creator: ACCOUNT_ADDRESS,
+      creator: accountAddress,
       visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ, // Public for easy access
       chargedReadQuota: Long.fromString('0'), // Free read quota
       primarySpAddress: (await getPrimarySpAddress()), // Get SP from list
-      paymentAddress: ACCOUNT_ADDRESS,
+      paymentAddress: accountAddress,
     });
 
     // Simulate gas
@@ -95,7 +136,7 @@ async function ensureBucketExists(): Promise<void> {
       denom: 'BNB',
       gasLimit: Number(simulateInfo.gasLimit),
       gasPrice: simulateInfo.gasPrice || '5000000000',
-      payer: ACCOUNT_ADDRESS,
+      payer: accountAddress,
       granter: '',
       privateKey: ACCOUNT_PRIVATE_KEY,
     });
@@ -134,7 +175,9 @@ export async function initializeStorage(): Promise<void> {
   } catch (error) {
     logError('initializeStorage', error as Error);
     logger.warn('Failed to initialize Greenfield storage');
-    throw error;
+    logger.warn('   Storage will work in fallback mode (local only)');
+    logger.warn('   Fix WALLET_PRIVATE_KEY in .env to enable full storage features');
+    // Don't throw - allow app to continue without storage
   }
 }
 
@@ -142,9 +185,9 @@ export async function initializeStorage(): Promise<void> {
  * Store memory (trade data as JSON) on Greenfield
  */
 export async function storeMemory(tradeData: TradeMemory): Promise<string> {
-  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  const accountAddress = getAccountAddress();
   
-  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+  if (!accountAddress) {
     logger.warn('🚨 Memory storage disabled - using local fallback (no wallet configured)');
     const fallbackId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     logger.info(`Simulated memory storage: ${tradeData.tokenSymbol} ${tradeData.action}`);
@@ -168,7 +211,7 @@ export async function storeMemory(tradeData: TradeMemory): Promise<string> {
     const createObjectTx = await greenfieldClient.object.createObject({
       bucketName: BUCKET_NAME,
       objectName,
-      creator: ACCOUNT_ADDRESS,
+      creator: accountAddress,
       visibility: VisibilityType.VISIBILITY_TYPE_PUBLIC_READ,
       contentType: 'application/json',
       redundancyType: RedundancyType.REDUNDANCY_EC_TYPE, // Error-correcting for reliability
@@ -184,7 +227,7 @@ export async function storeMemory(tradeData: TradeMemory): Promise<string> {
       denom: 'BNB',
       gasLimit: Number(simulateInfo.gasLimit),
       gasPrice: simulateInfo.gasPrice || '5000000000',
-      payer: ACCOUNT_ADDRESS,
+      payer: accountAddress,
       granter: '',
       privateKey: ACCOUNT_PRIVATE_KEY,
     });
@@ -226,9 +269,9 @@ export async function storeMemory(tradeData: TradeMemory): Promise<string> {
  * Fetch memory by object name (returns parsed JSON)
  */
 export async function fetchMemory(objectName: string): Promise<TradeMemory | null> {
-  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  const accountAddress = getAccountAddress();
   
-  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+  if (!accountAddress) {
     logger.warn('🚨 Cannot fetch memory - no valid wallet configured');
     return null;
   }
@@ -287,9 +330,9 @@ export async function fetchMemory(objectName: string): Promise<TradeMemory | nul
  * List all stored memories in bucket
  */
 export async function fetchAllMemories(): Promise<string[]> {
-  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  const accountAddress = getAccountAddress();
   
-  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+  if (!accountAddress) {
     logger.warn('🚨 Cannot fetch memories - no valid wallet configured');
     return [];
   }
@@ -354,9 +397,9 @@ export async function updateMemory(
  * Delete a memory (optional, for cleanup)
  */
 export async function deleteMemory(objectName: string): Promise<boolean> {
-  const isTestWallet = ACCOUNT_PRIVATE_KEY && ACCOUNT_PRIVATE_KEY.length > 20 && ACCOUNT_PRIVATE_KEY.startsWith('0x');
+  const accountAddress = getAccountAddress();
   
-  if (!isTestWallet || !ACCOUNT_ADDRESS) {
+  if (!accountAddress) {
     logger.warn('🚨 Cannot delete memory - no valid wallet configured');
     return false;
   }
@@ -367,7 +410,7 @@ export async function deleteMemory(objectName: string): Promise<boolean> {
     const deleteTx = await greenfieldClient.object.deleteObject({
       bucketName: BUCKET_NAME,
       objectName,
-      operator: ACCOUNT_ADDRESS,
+      operator: accountAddress,
     });
 
     const simulateInfo = await deleteTx.simulate({ denom: 'BNB' });
@@ -376,7 +419,7 @@ export async function deleteMemory(objectName: string): Promise<boolean> {
       denom: 'BNB',
       gasLimit: Number(simulateInfo.gasLimit),
       gasPrice: simulateInfo.gasPrice || '5000000000',
-      payer: ACCOUNT_ADDRESS,
+      payer: accountAddress,
       granter: '',
       privateKey: ACCOUNT_PRIVATE_KEY,
     });

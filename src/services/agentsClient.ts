@@ -3,7 +3,7 @@
  * Provides RAG and web search capabilities
  */
 
-import axios, { AxiosInstance } from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 
 export interface WebSearchRequest {

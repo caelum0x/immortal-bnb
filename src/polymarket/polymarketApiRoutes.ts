@@ -3,7 +3,7 @@
  * REST API endpoints for Polymarket integration
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { polymarketService } from './polymarketClient.js';
 import { polymarketRealtimeService } from './realtimeDataService.js';
 import { getWebSocketService } from '../services/websocket.js';
@@ -92,6 +92,9 @@ router.get('/market/:id', async (req: Request, res: Response) => {
     }
 
     const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ error: 'Market ID required' });
+    }
     const market = await polymarketService.getMarket(id);
 
     if (!market) {
@@ -116,6 +119,9 @@ router.get('/orderbook/:marketId', async (req: Request, res: Response) => {
     }
 
     const { marketId } = req.params;
+    if (!marketId) {
+      return res.status(400).json({ error: 'Market ID required' });
+    }
     const orderbook = await polymarketService.getOrderBook(marketId);
 
     if (!orderbook) {
@@ -175,6 +181,9 @@ router.delete('/order/:orderId', async (req: Request, res: Response) => {
     }
 
     const { orderId } = req.params;
+    if (!orderId) {
+      return res.status(400).json({ error: 'Order ID required' });
+    }
     const success = await polymarketService.cancelOrder(orderId);
 
     res.json({ success });

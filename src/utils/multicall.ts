@@ -57,6 +57,9 @@ export class Multicall {
       }));
 
       // Execute multicall
+      if (!this.multicall || !this.multicall.aggregate3) {
+        throw new Error('Multicall contract not initialized');
+      }
       const results = await this.multicall.aggregate3(formattedCalls);
 
       logger.info(`✅ Multicall completed: ${results.length} results`);
@@ -105,10 +108,10 @@ export class Multicall {
     const results = await this.call(calls);
 
     // Decode results
-    return results.map((result, index) => {
+    return results.map((result, index): { pairAddress: string; reserve0: bigint; reserve1: bigint; blockTimestampLast: number; success: boolean } => {
       if (!result.success) {
         return {
-          pairAddress: pairAddresses[index],
+          pairAddress: pairAddresses[index] || '',
           reserve0: 0n,
           reserve1: 0n,
           blockTimestampLast: 0,
@@ -119,16 +122,16 @@ export class Multicall {
       try {
         const decoded = pairInterface.decodeFunctionResult('getReserves', result.returnData);
         return {
-          pairAddress: pairAddresses[index],
-          reserve0: decoded.reserve0,
-          reserve1: decoded.reserve1,
-          blockTimestampLast: Number(decoded.blockTimestampLast),
+          pairAddress: pairAddresses[index] || '',
+          reserve0: decoded.reserve0 || 0n,
+          reserve1: decoded.reserve1 || 0n,
+          blockTimestampLast: Number(decoded.blockTimestampLast || 0),
           success: true,
         };
       } catch (error) {
         logger.warn(`Failed to decode reserves for ${pairAddresses[index]}`);
         return {
-          pairAddress: pairAddresses[index],
+          pairAddress: pairAddresses[index] || '',
           reserve0: 0n,
           reserve1: 0n,
           blockTimestampLast: 0,
@@ -172,10 +175,10 @@ export class Multicall {
     const results = await this.call(calls);
 
     // Decode results
-    return results.map((result, index) => {
+    return results.map((result, index): { tokenAddress: string; balance: bigint; success: boolean } => {
       if (!result.success) {
         return {
-          tokenAddress: tokenAddresses[index],
+          tokenAddress: tokenAddresses[index] || '',
           balance: 0n,
           success: false,
         };
@@ -184,14 +187,14 @@ export class Multicall {
       try {
         const decoded = erc20Interface.decodeFunctionResult('balanceOf', result.returnData);
         return {
-          tokenAddress: tokenAddresses[index],
-          balance: decoded[0],
+          tokenAddress: tokenAddresses[index] || '',
+          balance: decoded[0] || 0n,
           success: true,
         };
       } catch (error) {
         logger.warn(`Failed to decode balance for ${tokenAddresses[index]}`);
         return {
-          tokenAddress: tokenAddresses[index],
+          tokenAddress: tokenAddresses[index] || '',
           balance: 0n,
           success: false,
         };
@@ -265,13 +268,13 @@ export class Multicall {
       let decimals: number | undefined;
 
       try {
-        if (nameResult.success) {
-          name = erc20Interface.decodeFunctionResult('name', nameResult.returnData)[0];
+        if (nameResult?.success && nameResult.returnData) {
+          name = erc20Interface.decodeFunctionResult('name', nameResult.returnData)[0] as string;
         }
-        if (symbolResult.success) {
-          symbol = erc20Interface.decodeFunctionResult('symbol', symbolResult.returnData)[0];
+        if (symbolResult?.success && symbolResult.returnData) {
+          symbol = erc20Interface.decodeFunctionResult('symbol', symbolResult.returnData)[0] as string;
         }
-        if (decimalsResult.success) {
+        if (decimalsResult?.success && decimalsResult.returnData) {
           decimals = Number(
             erc20Interface.decodeFunctionResult('decimals', decimalsResult.returnData)[0]
           );
@@ -281,11 +284,11 @@ export class Multicall {
       }
 
       metadata.push({
-        tokenAddress: tokenAddresses[i],
-        name,
-        symbol,
-        decimals,
-        success: nameResult.success || symbolResult.success || decimalsResult.success,
+        tokenAddress: tokenAddresses[i] || '',
+        name: name || '',
+        symbol: symbol || '',
+        decimals: decimals || 18,
+        success: nameResult?.success || symbolResult?.success || decimalsResult?.success || false,
       });
     }
 

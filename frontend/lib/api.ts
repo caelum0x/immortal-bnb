@@ -19,35 +19,64 @@ class APIClient {
           ...options?.headers,
         },
         ...options,
+        // Add timeout to detect connection issues faster
+        signal: AbortSignal.timeout(10000), // 10 second timeout
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
       }
 
       return response.json();
     } catch (error) {
       console.error(`API request failed for ${endpoint}:`, error);
       
-      // Return mock data for development when backend is not configured
-      if (error instanceof Error && error.message.includes('fetch')) {
-        console.warn('🔄 Backend not available, using mock data for development');
-        return this.getMockData(endpoint) as T;
+      // Only return mock data for network errors (connection refused, timeout, etc.)
+      // Don't use mock data for HTTP errors (4xx, 5xx) - these should be thrown
+      if (error instanceof Error) {
+        const isNetworkError = 
+          error.message.includes('fetch') ||
+          error.message.includes('Failed to fetch') ||
+          error.message.includes('NetworkError') ||
+          error.message.includes('network') ||
+          error.name === 'AbortError' ||
+          error.name === 'TypeError';
+        
+        if (isNetworkError && !error.message.includes('HTTP')) {
+          console.warn(`🔄 Backend connection failed (${error.message}), using mock data for development`);
+          return this.getMockData(endpoint) as T;
+        }
       }
       
+      // Re-throw all other errors (HTTP errors, validation errors, etc.)
       throw error;
     }
   }
 
   private getMockData(endpoint: string): any {
     // Provide mock data when backend is not configured
-    if (endpoint.includes('/api/status')) {
+    if (endpoint.includes('/api/bot-status') || endpoint.includes('/api/status')) {
       return {
-        status: 'demo',
-        message: 'Backend not configured - Demo Mode',
-        walletConnected: false,
-        aiEnabled: false,
-        needsSetup: true
+        running: false,
+        watchlist: [],
+        riskLevel: 5,
+        config: {
+          maxTradeAmount: 1,
+          stopLoss: 10,
+          network: 'testnet',
+          interval: 300000
+        },
+        dex: {
+          status: 'STOPPED',
+          lastTrade: null
+        },
+        polymarket: {
+          status: 'STOPPED',
+          lastTrade: null
+        },
+        _mock: true, // Flag to indicate this is mock data
+        _message: 'Backend connection failed - Using offline mode'
       };
     }
 
@@ -56,7 +85,8 @@ class APIClient {
         balance: '0.0000',
         usdValue: '0.00',
         network: 'Not Connected',
-        address: 'Connect Wallet First'
+        address: 'Connect Wallet First',
+        _mock: true
       };
     }
 
@@ -64,20 +94,26 @@ class APIClient {
       return {
         trades: [],
         total: 0,
-        message: 'No trades available - Configure wallet first'
+        _mock: true,
+        message: 'No trades available - Backend offline'
       };
     }
 
-    if (endpoint.includes('/api/stats')) {
+    if (endpoint.includes('/api/stats') || endpoint.includes('/api/trading-stats')) {
       return {
         totalTrades: 0,
         successRate: 0,
         totalProfit: '0.00',
+        _mock: true,
         needsConfiguration: true
       };
     }
 
-    return { error: 'Backend not configured', needsSetup: true };
+    return { 
+      error: 'Backend not configured', 
+      needsSetup: true,
+      _mock: true 
+    };
   }
 
   // Bot Status API - Fixed to match backend endpoint
@@ -415,6 +451,9 @@ export interface TokenInfo {
 export async function getMemories(limit = 50): Promise<TradeMemory[]> {
   const response = await apiClient.getMemories(limit);
   // Transform backend response to match TradeMemory interface
+  if (!response || !response.memories || !Array.isArray(response.memories)) {
+    return [];
+  }
   return response.memories.map(m => ({
     id: m.id,
     timestamp: m.timestamp,

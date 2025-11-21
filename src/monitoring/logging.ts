@@ -34,12 +34,13 @@ const jsonFormat = winston.format.combine(
   winston.format.errors({ stack: true }),
   winston.format.json(),
   winston.format.printf((info) => {
+    const { timestamp, level, message, ...rest } = info;
     const logEntry: any = {
-      timestamp: info.timestamp,
-      level: info.level,
-      message: info.message,
+      timestamp,
+      level,
+      message,
       correlationId: getCurrentCorrelationId() || 'unknown',
-      ...info,
+      ...rest,
     };
 
     // Remove winston-specific fields

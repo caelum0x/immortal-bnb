@@ -5,7 +5,7 @@
  * Handles all blockchain interactions for token, staking, and arbitrage contracts.
  */
 
-import { ethers, Contract, providers, Wallet } from 'ethers';
+import { ethers, Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { IMMBOT_TOKEN_ABI, STAKING_CONTRACT_ABI, FLASH_LOAN_ARBITRAGE_ABI } from '../contracts/abis';
 import logger from '../utils/logger';
 
@@ -74,7 +74,7 @@ export interface ArbitrageSimulation {
 }
 
 export class ContractService {
-  private provider: providers.Provider;
+  private provider: JsonRpcProvider;
   private wallet?: Wallet;
   private tokenContract?: Contract;
   private stakingContract?: Contract;
@@ -85,7 +85,7 @@ export class ContractService {
     this.config = config;
 
     // Initialize provider
-    this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+    this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
 
     // Initialize wallet if private key is provided
     if (config.privateKey) {
@@ -152,22 +152,22 @@ export class ContractService {
         burnPercentage,
         liquidityPercentage,
       ] = await Promise.all([
-        this.tokenContract.name(),
-        this.tokenContract.symbol(),
-        this.tokenContract.decimals(),
-        this.tokenContract.totalSupply(),
-        this.tokenContract.liquidityWallet(),
-        this.tokenContract.stakingContract(),
-        this.tokenContract.TAX_PERCENTAGE(),
-        this.tokenContract.BURN_PERCENTAGE(),
-        this.tokenContract.LIQUIDITY_PERCENTAGE(),
+        (this.tokenContract as any).name(),
+        (this.tokenContract as any).symbol(),
+        (this.tokenContract as any).decimals(),
+        (this.tokenContract as any).totalSupply(),
+        (this.tokenContract as any).liquidityWallet(),
+        (this.tokenContract as any).stakingContract(),
+        (this.tokenContract as any).TAX_PERCENTAGE(),
+        (this.tokenContract as any).BURN_PERCENTAGE(),
+        (this.tokenContract as any).LIQUIDITY_PERCENTAGE(),
       ]);
 
       return {
         name,
         symbol,
         decimals: decimals.toNumber(),
-        totalSupply: ethers.utils.formatUnits(totalSupply, decimals),
+        totalSupply: ethers.formatUnits(totalSupply, decimals),
         liquidityWallet,
         stakingContract,
         taxPercentage: taxPercentage.toNumber(),
@@ -187,14 +187,14 @@ export class ContractService {
 
     try {
       const [balance, decimals] = await Promise.all([
-        this.tokenContract.balanceOf(address),
-        this.tokenContract.decimals(),
+        (this.tokenContract as any).balanceOf(address),
+        (this.tokenContract as any).decimals(),
       ]);
 
       return {
         address,
         balance: balance.toString(),
-        balanceFormatted: ethers.utils.formatUnits(balance, decimals),
+        balanceFormatted: ethers.formatUnits(balance, decimals),
       };
     } catch (error) {
       logger.error('Failed to get token balance', { address, error });
@@ -208,7 +208,7 @@ export class ContractService {
     }
 
     try {
-      const tx = await this.tokenContract.approve(spender, amount);
+      const tx = await (this.tokenContract as any).approve(spender, amount);
       logger.info('Token approval transaction sent', { txHash: tx.hash, spender, amount });
 
       const receipt = await tx.wait();
@@ -227,7 +227,7 @@ export class ContractService {
     }
 
     try {
-      const tx = await this.tokenContract.transfer(recipient, amount);
+      const tx = await (this.tokenContract as any).transfer(recipient, amount);
       logger.info('Token transfer transaction sent', { txHash: tx.hash, recipient, amount });
 
       const receipt = await tx.wait();
@@ -251,14 +251,14 @@ export class ContractService {
 
     try {
       const [lockPeriodsCount, baseAPY] = await Promise.all([
-        this.stakingContract.lockPeriodsCount(),
-        this.stakingContract.baseAPY(),
+        (this.stakingContract as any).lockPeriodsCount(),
+        (this.stakingContract as any).baseAPY(),
       ]);
 
       const pools: StakingPool[] = [];
 
       for (let i = 0; i < lockPeriodsCount.toNumber(); i++) {
-        const lockPeriod = await this.stakingContract.lockPeriods(i);
+        const lockPeriod = await (this.stakingContract as any).lockPeriods(i);
 
         const apy = (baseAPY.toNumber() * lockPeriod.multiplier.toNumber()) / 10000 / 100;
 
@@ -285,9 +285,9 @@ export class ContractService {
 
     try {
       const [totalStaked, totalRewardsPaid, totalStakers] = await Promise.all([
-        this.stakingContract.totalStaked(),
-        this.stakingContract.totalRewardsPaid(),
-        this.stakingContract.totalStakers(),
+        (this.stakingContract as any).totalStaked(),
+        (this.stakingContract as any).totalRewardsPaid(),
+        (this.stakingContract as any).totalStakers(),
       ]);
 
       let userTotalStaked = '0';
@@ -295,19 +295,19 @@ export class ContractService {
 
       if (userAddress) {
         [userTotalStaked, userTotalRewards] = await Promise.all([
-          this.stakingContract.userTotalStaked(userAddress),
-          this.stakingContract.userTotalRewards(userAddress),
+          (this.stakingContract as any).userTotalStaked(userAddress),
+          (this.stakingContract as any).userTotalRewards(userAddress),
         ]);
       }
 
       const decimals = 18; // IMMBOT has 18 decimals
 
       return {
-        totalStaked: ethers.utils.formatUnits(totalStaked, decimals),
-        totalRewardsPaid: ethers.utils.formatUnits(totalRewardsPaid, decimals),
+        totalStaked: ethers.formatUnits(totalStaked, decimals),
+        totalRewardsPaid: ethers.formatUnits(totalRewardsPaid, decimals),
         totalStakers: totalStakers.toNumber(),
-        userTotalStaked: ethers.utils.formatUnits(userTotalStaked, decimals),
-        userTotalRewards: ethers.utils.formatUnits(userTotalRewards, decimals),
+        userTotalStaked: ethers.formatUnits(userTotalStaked, decimals),
+        userTotalRewards: ethers.formatUnits(userTotalRewards, decimals),
       };
     } catch (error) {
       logger.error('Failed to get staking stats', { error });
@@ -322,9 +322,9 @@ export class ContractService {
 
     try {
       const [stakeCount, baseAPY, lockPeriodsCount] = await Promise.all([
-        this.stakingContract.userStakeCount(userAddress),
-        this.stakingContract.baseAPY(),
-        this.stakingContract.lockPeriodsCount(),
+        (this.stakingContract as any).userStakeCount(userAddress),
+        (this.stakingContract as any).baseAPY(),
+        (this.stakingContract as any).lockPeriodsCount(),
       ]);
 
       const stakes: StakePosition[] = [];
@@ -333,13 +333,13 @@ export class ContractService {
       // Get lock periods for APY calculation
       const lockPeriods = [];
       for (let i = 0; i < lockPeriodsCount.toNumber(); i++) {
-        lockPeriods.push(await this.stakingContract.lockPeriods(i));
+        lockPeriods.push(await (this.stakingContract as any).lockPeriods(i));
       }
 
       for (let i = 0; i < stakeCount.toNumber(); i++) {
         const [stake, rewards] = await Promise.all([
-          this.stakingContract.userStakes(userAddress, i),
-          this.stakingContract.calculateRewards(userAddress, i),
+          (this.stakingContract as any).userStakes(userAddress, i),
+          (this.stakingContract as any).calculateRewards(userAddress, i),
         ]);
 
         if (!stake.isActive) continue;
@@ -351,14 +351,14 @@ export class ContractService {
         const daysRemaining = Math.max(0, Math.ceil((stake.unlockTime.toNumber() - now) / 86400));
 
         stakes.push({
-          amount: ethers.utils.formatUnits(stake.amount, decimals),
+          amount: ethers.formatUnits(stake.amount, decimals),
           stakingTime: stake.stakingTime.toNumber(),
           unlockTime: stake.unlockTime.toNumber(),
           lockPeriodId: stake.lockPeriodId.toNumber(),
-          accumulatedReward: ethers.utils.formatUnits(stake.accumulatedReward, decimals),
+          accumulatedReward: ethers.formatUnits(stake.accumulatedReward, decimals),
           lastRewardTime: stake.lastRewardTime.toNumber(),
           isActive: stake.isActive,
-          rewards: ethers.utils.formatUnits(rewards, decimals),
+          rewards: ethers.formatUnits(rewards, decimals),
           daysRemaining,
           apy,
         });
@@ -378,11 +378,11 @@ export class ContractService {
 
     try {
       // Convert amount to Wei
-      const amountWei = ethers.utils.parseEther(amount);
+      const amountWei = ethers.parseEther(amount);
 
       // First, approve the staking contract to spend tokens
       if (this.tokenContract) {
-        const approveTx = await this.tokenContract.approve(
+        const approveTx = await (this.tokenContract as any).approve(
           this.config.stakingAddress,
           amountWei
         );
@@ -391,7 +391,7 @@ export class ContractService {
       }
 
       // Then stake
-      const tx = await this.stakingContract.stake(amountWei, lockPeriodId);
+      const tx = await (this.stakingContract as any).stake(amountWei, lockPeriodId);
       logger.info('Stake transaction sent', { txHash: tx.hash, amount, lockPeriodId });
 
       const receipt = await tx.wait();
@@ -410,7 +410,7 @@ export class ContractService {
     }
 
     try {
-      const tx = await this.stakingContract.withdraw(stakeIndex);
+      const tx = await (this.stakingContract as any).withdraw(stakeIndex);
       logger.info('Withdraw transaction sent', { txHash: tx.hash, stakeIndex });
 
       const receipt = await tx.wait();
@@ -429,7 +429,7 @@ export class ContractService {
     }
 
     try {
-      const tx = await this.stakingContract.claimRewards(stakeIndex);
+      const tx = await (this.stakingContract as any).claimRewards(stakeIndex);
       logger.info('Claim rewards transaction sent', { txHash: tx.hash, stakeIndex });
 
       const receipt = await tx.wait();
@@ -459,8 +459,8 @@ export class ContractService {
     }
 
     try {
-      const loanAmountWei = ethers.utils.parseEther(loanAmount);
-      const minProfitWei = ethers.utils.parseEther(minProfit);
+      const loanAmountWei = ethers.parseEther(loanAmount);
+      const minProfitWei = ethers.parseEther(minProfit);
 
       const params = {
         buyRouter,
@@ -470,9 +470,9 @@ export class ContractService {
         minProfit: minProfitWei,
       };
 
-      const result = await this.arbitrageContract.simulateArbitrage(loanAmountWei, params);
+      const result = await (this.arbitrageContract as any).simulateArbitrage(loanAmountWei, params);
 
-      const expectedProfit = ethers.utils.formatEther(result.expectedProfit);
+      const expectedProfit = ethers.formatEther(result.expectedProfit);
       const profitPercentage = (parseFloat(expectedProfit) / parseFloat(loanAmount)) * 100;
 
       return {
@@ -501,9 +501,9 @@ export class ContractService {
     }
 
     try {
-      const amount0Wei = ethers.utils.parseEther(amount0);
-      const amount1Wei = ethers.utils.parseEther(amount1);
-      const minProfitWei = ethers.utils.parseEther(minProfit);
+      const amount0Wei = ethers.parseEther(amount0);
+      const amount1Wei = ethers.parseEther(amount1);
+      const minProfitWei = ethers.parseEther(minProfit);
 
       const params = {
         buyRouter,
@@ -513,7 +513,7 @@ export class ContractService {
         minProfit: minProfitWei,
       };
 
-      const tx = await this.arbitrageContract.executeFlashLoanArbitrage(
+      const tx = await (this.arbitrageContract as any).executeFlashLoanArbitrage(
         pool,
         amount0Wei,
         amount1Wei,
@@ -541,13 +541,14 @@ export class ContractService {
   }
 
   async getGasPrice(): Promise<string> {
-    const gasPrice = await this.provider.getGasPrice();
-    return ethers.utils.formatUnits(gasPrice, 'gwei');
+    const feeData = await this.provider.getFeeData();
+    const gasPrice = feeData.gasPrice || 0n;
+    return ethers.formatUnits(gasPrice, 'gwei');
   }
 
   async getNativeBalance(address: string): Promise<string> {
     const balance = await this.provider.getBalance(address);
-    return ethers.utils.formatEther(balance);
+    return ethers.formatEther(balance);
   }
 
   async estimateGas(tx: any): Promise<string> {

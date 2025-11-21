@@ -72,12 +72,20 @@ export class FlashbotsService {
         targetBlockNumber
       );
 
-      // Wait for inclusion
+      // Check if it's an error response
+      if ('error' in bundleSubmission) {
+        logger.warn('Bundle submission error:', bundleSubmission.error);
+        return { success: false, error: bundleSubmission.error.message };
+      }
+
+      // Wait for inclusion (bundleSubmission is a FlashbotsTransaction)
       const waitResponse = await bundleSubmission.wait();
 
       if (waitResponse === 0) {
         logger.info('⚡ Bundle included in block');
-        return { success: true, bundleHash: bundleSubmission.bundleHash };
+        // Get bundle hash from the response or transaction
+        const bundleHash = 'bundleHash' in bundleSubmission ? bundleSubmission.bundleHash : undefined;
+        return { success: true, bundleHash };
       } else {
         logger.warn('Bundle not included:', waitResponse);
         return { success: false, error: `Bundle not included: ${waitResponse}` };
@@ -110,11 +118,18 @@ export class FlashbotsService {
         targetBlockNumber
       );
 
+      // Check if it's an error response
+      if ('error' in bundleSubmission) {
+        logger.warn('Bundle submission error:', bundleSubmission.error);
+        return { success: false };
+      }
+
       const waitResponse = await bundleSubmission.wait();
 
       if (waitResponse === 0) {
         logger.info(`⚡ Bundle with ${bundle.length} transactions included`);
-        return { success: true, bundleHash: bundleSubmission.bundleHash };
+        const bundleHash = 'bundleHash' in bundleSubmission ? bundleSubmission.bundleHash : undefined;
+        return { success: true, bundleHash };
       } else {
         logger.warn('Bundle not included');
         return { success: false };
@@ -137,9 +152,12 @@ export class FlashbotsService {
     }
 
     try {
+      // Create bundle array with signed transactions
       const bundle = signedTransactions.map(tx => ({ signedTransaction: tx }));
 
-      const simulation = await this.flashbotsProvider!.simulate(bundle, targetBlock);
+      // Simulate bundle - check if simulate accepts bundle format or needs different format
+      // The simulate method may expect the bundle items directly
+      const simulation = await this.flashbotsProvider!.simulate(bundle as any, targetBlock);
 
       if ('error' in simulation) {
         return { success: false, error: simulation.error.message };

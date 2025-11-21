@@ -5,10 +5,13 @@
 
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-otlp-http';
-import { trace, context, Span, SpanStatusCode } from '@opentelemetry/api';
+import { trace, context, type Span, SpanStatusCode } from '@opentelemetry/api';
+
+// Dynamic import for Resource to avoid type-only import issues
+const ResourceModule = require('@opentelemetry/resources');
+const Resource = ResourceModule.Resource;
 
 // Initialize OpenTelemetry SDK
 let sdk: NodeSDK | null = null;
@@ -26,11 +29,11 @@ export function initializeTracing(): void {
   });
 
   sdk = new NodeSDK({
-    resource: new Resource({
+    resource: Resource.default().merge(Resource.create({
       [SemanticResourceAttributes.SERVICE_NAME]: 'immortal-ai-trading-bot',
       [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
-    }),
-    traceExporter,
+    })),
+    traceExporter: traceExporter as any,
     instrumentations: [getNodeAutoInstrumentations()],
   });
 

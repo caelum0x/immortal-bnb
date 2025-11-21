@@ -12,6 +12,9 @@ async function main() {
 
   // Get deployer
   const [deployer] = await ethers.getSigners();
+  if (!deployer) {
+    throw new Error("No deployer account found");
+  }
   console.log(`Deploying with account: ${deployer.address}`);
 
   // Check balance
@@ -59,7 +62,11 @@ async function main() {
   // Check staking tiers
   console.log("📊 Default Staking Tiers:");
   for (let i = 0; i < 4; i++) {
-    const tier = await staking.tiers(i);
+    const tiers = staking.tiers;
+    if (!tiers) {
+      break;
+    }
+    const tier = await tiers(i);
     const durationDays = Number(tier.duration) / 86400;
     const apy = Number(tier.apyBasisPoints) / 100;
     console.log(`  Tier ${i}: ${durationDays} days - ${apy}% APY${tier.active ? " (Active)" : ""}`);
@@ -107,7 +114,11 @@ async function main() {
   console.log("🔗 Setting staking contract on token...");
   try {
     const token = await ethers.getContractAt("IMMBotToken", tokenAddress);
-    const tx = await token.setStakingContract(stakingAddress);
+    const setStakingContract = token.setStakingContract;
+    if (!setStakingContract) {
+      throw new Error("setStakingContract method not found");
+    }
+    const tx = await setStakingContract(stakingAddress);
     await tx.wait();
     console.log("✅ Staking contract set on token successfully!\n");
   } catch (error) {

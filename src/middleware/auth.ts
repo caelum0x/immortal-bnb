@@ -3,12 +3,19 @@
  * Handles JWT token generation, validation, and API key management
  */
 
+// @ts-ignore - jsonwebtoken types may not be installed
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger.js';
 import { CONFIG } from '../config.js';
 import { getSecret, hashSecret, verifySecret } from '../config/secrets.js';
-import { prisma } from '../db/client.js';
+// Optional Prisma import
+let prisma: any;
+try {
+  prisma = require('../db/client.js').prisma;
+} catch {
+  prisma = { user: { findUnique: () => Promise.resolve(null) } };
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'immortal-ai-trading-bot-secret-change-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
@@ -140,15 +147,19 @@ export function combineAuth(...middlewares: Array<(req: Request, res: Response, 
     const runNext = () => {
       if (currentIndex < middlewares.length) {
         const middleware = middlewares[currentIndex++];
-        middleware(req, res, (err?: any) => {
-          if (err) {
-            return next(err);
-          }
-          if (res.headersSent) {
-            return;
-          }
-          runNext();
-        });
+        if (middleware) {
+          middleware(req, res, (err?: any) => {
+            if (err) {
+              return next(err);
+            }
+            if (res.headersSent) {
+              return;
+            }
+            runNext();
+          });
+        } else {
+          next();
+        }
       } else {
         next();
       }

@@ -324,9 +324,6 @@ async function startTradingBot() {
   console.log('═'.repeat(70));
   console.log(colors.reset);
 
-  // Import and start the main bot
-  const { startBot } = await import('./src/index');
-
   console.log('\n' + colors.cyan + 'Bot Configuration:' + colors.reset);
   console.log(`  • Network: ${CONFIG.TRADING_NETWORK}`);
   console.log(`  • Chain ID: ${CONFIG.CHAIN_ID}`);
@@ -352,7 +349,7 @@ async function startTradingBot() {
   console.log('\n' + colors.yellow + '⚠️  Press Ctrl+C to stop the bot gracefully' + colors.reset);
   console.log('═'.repeat(70) + '\n');
 
-  // Start the main bot with interval loop
+  // Import and start the main bot
   const { startBot } = await import('./src/index');
   await startBot();
 }

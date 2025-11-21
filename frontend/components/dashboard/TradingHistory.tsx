@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import api from '@/lib/apiClient';
+import { api } from '@/lib/api';
 import useWebSocket from '@/lib/useWebSocket';
 
 interface Trade {
