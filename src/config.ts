@@ -97,12 +97,9 @@ export const CONFIG = {
       return '';
     }
     
-    try {
-      return new ethers.Wallet(privateKey).address;
-    } catch (error) {
-      console.error('❌ Invalid WALLET_PRIVATE_KEY format:', (error as Error).message);
-      return '';
-    }
+    // Skip wallet creation in config - will be created in initializeProvider with better error handling
+    // This avoids Bun/ethers v6 compatibility issues during config loading
+    return '';
   })(),
 
   // Telegram

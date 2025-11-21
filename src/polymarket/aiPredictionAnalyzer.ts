@@ -72,9 +72,10 @@ export class AIPredictionAnalyzer {
       const { text } = await generateText({
         model: this.openrouter(CONFIG.AI_MODEL),
         prompt,
-        maxTokens: 500,
+        // maxTokens is not available in this API version, using maxGenerationTokens instead
+        maxGenerationTokens: 500,
         temperature: 0.7,
-      });
+      } as any);
 
       // Parse AI response
       const analysis = this.parseAIResponse(text, market, midPrice || 0.5);

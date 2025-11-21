@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useWeb3 } from '@/components/providers/Web3Provider';
-import api from '@/lib/apiClient';
+import { api } from '@/lib/api';
 import useWebSocket from '@/lib/useWebSocket';
 
 interface Portfolio {

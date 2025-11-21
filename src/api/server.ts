@@ -670,11 +670,11 @@ app.post('/api/polymarket/analyze', async (req: Request, res: Response) => {
     const analysis = await aiAnalyzer.analyzeMarket({
       id: market.id,
       question: market.question || question,
-      description: (market as any).description || '',
-      endDate: market.endDate || new Date(Date.now() + 86400000).toISOString(),
-      volume: typeof market.volume === 'number' ? market.volume : parseFloat(market.volume || '0'),
-      liquidity: typeof market.liquidity === 'number' ? market.liquidity : parseFloat(market.liquidity || '0'),
-    });
+      // description is not part of MarketInfo interface
+      endDate: market.endDate || new Date(Date.now() + 86400000),
+      volume: typeof market.volume === 'number' ? market.volume : parseFloat(String(market.volume || '0')),
+      liquidity: typeof market.liquidity === 'number' ? market.liquidity : parseFloat(String(market.liquidity || '0')),
+    } as any);
 
     res.json({
       market,

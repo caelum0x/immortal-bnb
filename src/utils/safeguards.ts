@@ -1,6 +1,7 @@
 import { logger } from './logger';
 import { CONFIG } from '../config';
 import { InsufficientFundsError, SlippageError } from './errorHandler';
+import { ethers } from 'ethers';
 
 export interface SafeguardConfig {
   maxTradeAmount: number;
@@ -212,6 +213,7 @@ export class SafeguardEngine {
   private dailyVolume = 0;
   private dailyVolumeResetTime = 0;
   private lastTradeTime = 0;
+  private provider?: ethers.JsonRpcProvider;
 
   private limits: TradingLimits = {
     maxSingleTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB || 0.1,

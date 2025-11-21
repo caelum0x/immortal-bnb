@@ -275,7 +275,7 @@ export class CrossPlatformStrategy {
         {
           platform: 'POLYMARKET' as const,
           chain: 'polygon' as const,
-          action: opp.signal,
+          action: (opp.signal === 'BUY' || opp.signal === 'SELL' ? opp.signal : 'BUY') as 'BUY' | 'SELL',
           asset: opp.question,
           amount: 100,
           price: opp.currentPrice,
@@ -422,7 +422,7 @@ export class CrossPlatformStrategy {
         );
 
         // Execute top opportunity
-        if (highConfidence.length > 0) {
+        if (highConfidence.length > 0 && highConfidence[0]) {
           await this.executeStrategy(highConfidence[0]);
         }
 

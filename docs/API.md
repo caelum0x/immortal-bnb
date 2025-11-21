@@ -1,116 +1,65 @@
-# 📡 API Documentation
+# API Documentation
 
-**Immortal AI Trading Bot - REST API Reference**
+Complete API reference for the Immortal AI Trading Bot.
 
-Base URL: `http://localhost:3001` (development)
-Production URL: `https://your-domain.com` (configure in deployment)
+## Base URL
 
----
+- **Development**: `http://localhost:3001`
+- **Production**: `https://api.immortal-bot.com`
 
-## 🔐 Authentication
+## Authentication
 
-Optional API key authentication (can be enabled):
+Most endpoints require authentication via API key:
 
 ```bash
-# Add to all requests
--H "X-API-Key: your-api-key-here"
+curl -H "X-API-Key: your-api-key" http://localhost:3001/api/endpoint
 ```
 
-See [SECURITY.md](./SECURITY.md) for setup instructions.
-
----
-
-## 📋 Endpoints
+## Endpoints
 
 ### Health Check
 
-**GET** `/health`
+#### GET /health
 
-Check if the API server is running.
-
-**Request:**
-```bash
-curl http://localhost:3001/health
-```
+Basic health check endpoint.
 
 **Response:**
 ```json
 {
   "status": "ok",
-  "timestamp": 1699123456789,
+  "timestamp": "2025-01-20T12:00:00.000Z",
   "botRunning": false
 }
 ```
 
-**Status Codes:**
-- `200` - Server is healthy
-- `500` - Server error
+#### GET /api/health
 
----
-
-### Get Bot Status
-
-**GET** `/api/bot-status`
-
-Get current trading bot status and configuration.
-
-**Request:**
-```bash
-curl http://localhost:3001/api/bot-status
-```
+Detailed health check with dependency status.
 
 **Response:**
 ```json
 {
-  "running": false,
-  "watchlist": [
-    "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
-  ],
-  "riskLevel": 5,
-  "config": {
-    "maxTradeAmount": 0.1,
-    "stopLoss": 10,
-    "network": "testnet",
-    "interval": 300000
+  "status": "healthy",
+  "timestamp": "2025-01-20T12:00:00.000Z",
+  "checks": {
+    "database": { "status": "up", "latency": 5 },
+    "redis": { "status": "up", "latency": 2 },
+    "blockchain": { "status": "up", "latency": 150 }
   }
 }
 ```
 
-**Fields:**
-- `running` (boolean) - Whether bot is currently running
-- `watchlist` (string[]) - Token addresses being monitored
-- `riskLevel` (number) - Risk level 1-10
-- `config` (object) - Current configuration
+### Bot Control
 
-**Status Codes:**
-- `200` - Success
-- `500` - Server error
+#### POST /api/start-bot
 
----
-
-### Start Bot
-
-**POST** `/api/start-bot`
-
-Start the trading bot with specified configuration.
+Start the trading bot.
 
 **Request:**
-```bash
-curl -X POST http://localhost:3001/api/start-bot \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tokens": [
-      "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
-    ],
-    "risk": 5
-  }'
-```
-
-**Request Body:**
-```typescript
+```json
 {
-  tokens: string[];    // Array of token addresses (can be empty for auto-discovery)
-  risk: number;        // Risk level 1-10
+  "tokens": ["0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"],
+  "risk": 5
 }
 ```
 
@@ -118,399 +67,203 @@ curl -X POST http://localhost:3001/api/start-bot \
 ```json
 {
   "status": "started",
-  "message": "Bot is now running",
   "config": {
-    "tokens": ["0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"],
+    "tokens": [],
     "riskLevel": 5,
-    "interval": 300000,
-    "maxTradeAmount": 0.1,
-    "stopLoss": 10,
-    "network": "testnet"
+    "maxTradeAmount": 0.1
   }
 }
 ```
 
-**Validation:**
-- `tokens` - Must be valid Ethereum addresses (0x + 40 hex chars)
-- `risk` - Must be integer between 1 and 10
-
-**Status Codes:**
-- `200` - Bot started successfully
-- `400` - Invalid request (validation failed, or bot already running)
-- `500` - Server error
-
----
-
-### Stop Bot
-
-**POST** `/api/stop-bot`
+#### POST /api/stop-bot
 
 Stop the trading bot.
 
-**Request:**
-```bash
-curl -X POST http://localhost:3001/api/stop-bot
+**Response:**
+```json
+{
+  "status": "stopped"
+}
 ```
+
+#### GET /api/bot-status
+
+Get current bot status.
 
 **Response:**
 ```json
 {
-  "status": "stopped",
-  "message": "Bot has been stopped"
+  "running": true,
+  "riskLevel": 5,
+  "watchlist": [],
+  "stats": {
+    "totalTrades": 10,
+    "winRate": 0.7
+  }
 }
 ```
 
-**Status Codes:**
-- `200` - Bot stopped successfully
-- `400` - Bot was not running
-- `500` - Server error
+### Trading Data
 
----
+#### GET /api/discover-tokens
 
-### Get Trading Memories
-
-**GET** `/api/memories`
-
-Retrieve trading memories stored on BNB Greenfield.
+Discover trending tokens.
 
 **Query Parameters:**
-- `limit` (optional) - Number of memories to return (default: 50, max: 100)
-
-**Request:**
-```bash
-curl "http://localhost:3001/api/memories?limit=10"
-```
-
-**Response:**
-```json
-{
-  "total": 42,
-  "memories": [
-    {
-      "id": "memory-abc123",
-      "timestamp": 1699123456789,
-      "tokenAddress": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
-      "tokenSymbol": "CAKE",
-      "action": "buy",
-      "entryPrice": 3.45,
-      "amount": 0.05,
-      "outcome": "profit",
-      "profitLoss": 0.002,
-      "aiReasoning": "Strong bullish momentum with increasing volume...",
-      "marketConditions": {
-        "volume24h": 45000000,
-        "liquidity": 120000000,
-        "priceChange24h": 5.2,
-        "buySellPressure": 1.35
-      }
-    }
-  ],
-  "message": "No memories yet - start trading!" // if empty
-}
-```
-
-**Memory Object:**
-- `id` (string) - Unique memory identifier
-- `timestamp` (number) - Unix timestamp in milliseconds
-- `tokenAddress` (string) - Token contract address
-- `tokenSymbol` (string) - Token symbol (e.g., "CAKE")
-- `action` (string) - "buy" or "sell"
-- `entryPrice` (number) - Entry price in USD
-- `amount` (number) - Amount in BNB
-- `outcome` (string) - "pending", "profit", or "loss"
-- `profitLoss` (number) - Profit/loss in BNB (if completed)
-- `aiReasoning` (string) - AI's explanation for the trade
-- `marketConditions` (object) - Market data at time of trade
-
-**Status Codes:**
-- `200` - Success
-- `500` - Server error (e.g., Greenfield unavailable)
-
----
-
-### Discover Trending Tokens
-
-**GET** `/api/discover-tokens`
-
-Get trending tokens from DexScreener on BNB Chain.
-
-**Query Parameters:**
-- `limit` (optional) - Number of tokens to return (default: 10, max: 50)
-
-**Request:**
-```bash
-curl "http://localhost:3001/api/discover-tokens?limit=5"
-```
+- `limit` (optional): Number of tokens to return (default: 20)
 
 **Response:**
 ```json
 {
   "tokens": [
     {
-      "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      "address": "0x...",
       "symbol": "CAKE",
-      "name": "PancakeSwap Token",
-      "priceUsd": "3.45",
-      "priceChange24h": 5.2,
-      "volume24h": 45000000,
-      "liquidity": 120000000,
-      "marketCap": 890000000
+      "price": 2.5,
+      "volume24h": 1000000
     }
   ],
-  "timestamp": 1699123456789,
-  "source": "DexScreener"
+  "timestamp": "2025-01-20T12:00:00.000Z"
 }
 ```
 
-**Token Object:**
-- `address` (string) - Token contract address
-- `symbol` (string) - Token ticker symbol
-- `name` (string) - Full token name
-- `priceUsd` (string) - Current price in USD
-- `priceChange24h` (number) - 24h price change percentage
-- `volume24h` (number) - 24h trading volume in USD
-- `liquidity` (number) - Total liquidity in USD
-- `marketCap` (number) - Market capitalization in USD
+#### GET /api/trade-logs
 
-**Status Codes:**
-- `200` - Success
-- `500` - Server error (e.g., DexScreener API unavailable)
-
----
-
-### Get Trading Statistics
-
-**GET** `/api/trading-stats`
-
-Get aggregated trading statistics.
-
-**Request:**
-```bash
-curl http://localhost:3001/api/trading-stats
-```
-
-**Response:**
-```json
-{
-  "totalTrades": 42,
-  "wins": 28,
-  "losses": 14,
-  "winRate": 66.67,
-  "totalPL": 0.125,
-  "avgPL": 0.00298,
-  "currentSession": {
-    "totalTrades": 5,
-    "wins": 3,
-    "losses": 2,
-    "winRate": 60,
-    "totalPL": 0.015,
-    "avgPL": 0.003
-  }
-}
-```
-
-**Fields:**
-- `totalTrades` (number) - All-time total trades
-- `wins` (number) - Profitable trades
-- `losses` (number) - Losing trades
-- `winRate` (number) - Win rate percentage
-- `totalPL` (number) - Total profit/loss in BNB
-- `avgPL` (number) - Average profit/loss per trade
-- `currentSession` (object) - Stats for current session only
-
-**Status Codes:**
-- `200` - Success
-- `500` - Server error
-
----
-
-### Get Trade Logs
-
-**GET** `/api/trade-logs`
-
-Get recent trade logs from current session.
+Get trade history.
 
 **Query Parameters:**
-- `limit` (optional) - Number of logs to return (default: 50, max: 100)
-
-**Request:**
-```bash
-curl "http://localhost:3001/api/trade-logs?limit=20"
-```
+- `limit` (optional): Number of logs to return (default: 50)
+- `offset` (optional): Pagination offset
+- `tokenAddress` (optional): Filter by token
 
 **Response:**
 ```json
 {
-  "total": 20,
   "logs": [
     {
-      "id": "log-123abc",
-      "timestamp": 1699123456789,
-      "token": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      "id": "uuid",
+      "tokenAddress": "0x...",
+      "action": "buy",
+      "amount": "0.1",
+      "txHash": "0x...",
+      "outcome": "profit",
+      "createdAt": "2025-01-20T12:00:00.000Z"
+    }
+  ],
+  "total": 100,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+#### GET /api/trading-stats
+
+Get trading statistics.
+
+**Response:**
+```json
+{
+  "totalTrades": 100,
+  "successfulTrades": 70,
+  "failedTrades": 30,
+  "winRate": 0.7,
+  "totalProfitLoss": "5.5",
+  "avgTradeTime": 5000
+}
+```
+
+### Memories
+
+#### GET /api/memories
+
+Get stored memories from Greenfield.
+
+**Query Parameters:**
+- `limit` (optional): Number of memories (default: 50)
+- `tokenAddress` (optional): Filter by token
+
+**Response:**
+```json
+{
+  "memories": [
+    {
+      "id": "memory-id",
       "tokenSymbol": "CAKE",
       "action": "buy",
-      "amount": 0.05,
-      "price": 3.45,
-      "status": "success",
-      "txHash": "0xabc...def",
-      "profitLoss": 0.002
+      "outcome": "profit",
+      "confidence": 0.8,
+      "createdAt": "2025-01-20T12:00:00.000Z"
     }
   ]
 }
 ```
 
-**Log Object:**
-- `id` (string) - Log identifier
-- `timestamp` (number) - Unix timestamp
-- `token` (string) - Token address
-- `tokenSymbol` (string) - Token symbol
-- `action` (string) - "buy" or "sell"
-- `amount` (number) - Amount in BNB
-- `price` (number) - Entry price
-- `status` (string) - "pending", "success", or "failed"
-- `txHash` (string) - Transaction hash
-- `error` (string) - Error message (if failed)
-- `profitLoss` (number) - P/L if completed
+### Metrics
 
-**Status Codes:**
-- `200` - Success
-- `500` - Server error
+#### GET /metrics
 
----
+Prometheus metrics endpoint.
 
-## ⚠️ Error Responses
+**Response:** Prometheus format metrics
 
-All endpoints may return errors in this format:
+## Error Responses
+
+All errors follow this format:
 
 ```json
 {
-  "error": "Error message",
+  "error": "Error Type",
+  "message": "Human-readable error message",
   "code": "ERROR_CODE"
 }
 ```
 
-**Common Error Codes:**
-- `VALIDATION_ERROR` - Invalid request parameters
-- `BOT_ALREADY_RUNNING` - Attempted to start bot when already running
-- `BOT_NOT_RUNNING` - Attempted to stop bot when not running
-- `INTERNAL_ERROR` - Server-side error
+### Status Codes
 
-**HTTP Status Codes:**
-- `400` - Bad Request (validation error)
-- `401` - Unauthorized (invalid API key)
-- `429` - Too Many Requests (rate limited)
-- `500` - Internal Server Error
+- `200`: Success
+- `400`: Bad Request
+- `401`: Unauthorized
+- `403`: Forbidden
+- `404`: Not Found
+- `429`: Too Many Requests
+- `500`: Internal Server Error
 
----
+## Rate Limiting
 
-## 🔒 Rate Limiting
+- **General API**: 100 requests per 15 minutes
+- **Bot Control**: 10 requests per 15 minutes
+- **Auth Endpoints**: 5 requests per 15 minutes
+- **Read Endpoints**: 200 requests per 15 minutes
 
-Requests are rate limited per IP address:
+Rate limit headers:
+- `X-RateLimit-Limit`: Maximum requests
+- `X-RateLimit-Remaining`: Remaining requests
+- `X-RateLimit-Reset`: Reset time (Unix timestamp)
 
-| Endpoint Category | Limit |
-|------------------|-------|
-| General API | 100 requests / 15 minutes |
-| Bot Control | 10 requests / 15 minutes |
-| Health Checks | 300 requests / 15 minutes |
+## WebSocket Events
 
-**Rate Limit Response:**
-```json
-{
-  "error": "Too many requests, please try again later"
-}
-```
+### Connection
 
-**HTTP Status:** `429 Too Many Requests`
-
-**Headers:**
-- `X-RateLimit-Limit` - Request limit
-- `X-RateLimit-Remaining` - Requests remaining
-- `X-RateLimit-Reset` - Time when limit resets (Unix timestamp)
-
----
-
-## 📊 Example Workflows
-
-### Start Trading Bot
-```bash
-# 1. Check bot status
-curl http://localhost:3001/api/bot-status
-
-# 2. Discover trending tokens
-curl "http://localhost:3001/api/discover-tokens?limit=5"
-
-# 3. Start bot with discovered tokens
-curl -X POST http://localhost:3001/api/start-bot \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tokens": ["0x...token1", "0x...token2"],
-    "risk": 5
-  }'
-
-# 4. Monitor status
-curl http://localhost:3001/api/bot-status
-
-# 5. Check trade logs
-curl http://localhost:3001/api/trade-logs
-
-# 6. Stop bot
-curl -X POST http://localhost:3001/api/stop-bot
-```
-
-### Monitor Trading Activity
-```bash
-# Poll for updates every 30 seconds
-while true; do
-  echo "--- $(date) ---"
-  curl http://localhost:3001/api/trading-stats
-  sleep 30
-done
-```
-
----
-
-## 🧪 Testing
-
-### Using cURL
-```bash
-# Health check
-curl -i http://localhost:3001/health
-
-# With API key
-curl -i http://localhost:3001/api/bot-status \
-  -H "X-API-Key: your-key"
-
-# POST with data
-curl -i -X POST http://localhost:3001/api/start-bot \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-key" \
-  -d '{"tokens":[],"risk":5}'
-```
-
-### Using JavaScript (fetch)
 ```javascript
-// Get bot status
-const status = await fetch('http://localhost:3001/api/bot-status', {
-  headers: {
-    'X-API-Key': 'your-key'
-  }
-}).then(r => r.json());
+const ws = new WebSocket('ws://localhost:3001');
 
-// Start bot
-const result = await fetch('http://localhost:3001/api/start-bot', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-API-Key': 'your-key'
-  },
-  body: JSON.stringify({
-    tokens: [],
-    risk: 5
-  })
-}).then(r => r.json());
+ws.on('open', () => {
+  console.log('Connected');
+});
 ```
 
----
+### Events
 
-**API Version**: 1.0.0
-**Last Updated**: 2025-11-08
+- `trade`: New trade executed
+- `bot-status`: Bot status change
+- `error`: Error occurred
+- `memory-stored`: New memory stored
+
+### Example
+
+```javascript
+ws.on('message', (data) => {
+  const event = JSON.parse(data);
+  console.log('Event:', event.type, event.data);
+});
+```

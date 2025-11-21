@@ -5,7 +5,7 @@
  */
 
 import { ethers } from 'ethers';
-import { ClobClient, Chain, ApiKeyCreds, ApiKeysResponse, BuilderApiKey, BuilderApiKeyResponse } from '@polymarket/clob-client';
+import { ClobClient, Chain, type ApiKeyCreds, type ApiKeysResponse, type BuilderApiKey, type BuilderApiKeyResponse } from '@polymarket/clob-client';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
 
@@ -37,7 +37,7 @@ export class PolymarketApiKeyManager {
         }
 
         this.wallet = new ethers.Wallet(pk);
-        this.client = new ClobClient(this.host, this.chainId, this.wallet);
+        this.client = new ClobClient(this.host, this.chainId, this.wallet as any);
 
         logger.info('🔑 Polymarket API Key Manager initialized');
         logger.info(`   - Host: ${this.host}`);
@@ -56,12 +56,13 @@ export class PolymarketApiKeyManager {
             const creds: ApiKeyCreds = await this.client.createApiKey(nonce);
 
             logger.info('   ✅ API key created successfully');
-            logger.info(`   - API Key: ${creds.apiKey.substring(0, 10)}...`);
+            const apiKeyValue = (creds as any).apiKey || (creds as any).key || '';
+            logger.info(`   - API Key: ${apiKeyValue.substring(0, 10)}...`);
 
             return {
-                apiKey: creds.apiKey,
-                secret: creds.secret,
-                passphrase: creds.passphrase,
+                apiKey: apiKeyValue,
+                secret: (creds as any).secret || '',
+                passphrase: (creds as any).passphrase || '',
                 created: Date.now(),
             };
         } catch (error) {
@@ -81,12 +82,13 @@ export class PolymarketApiKeyManager {
             const creds: ApiKeyCreds = await this.client.deriveApiKey(nonce);
 
             logger.info('   ✅ API key derived successfully');
-            logger.info(`   - API Key: ${creds.apiKey.substring(0, 10)}...`);
+            const apiKeyValue = (creds as any).apiKey || (creds as any).key || '';
+            logger.info(`   - API Key: ${apiKeyValue.substring(0, 10)}...`);
 
             return {
-                apiKey: creds.apiKey,
-                secret: creds.secret,
-                passphrase: creds.passphrase,
+                apiKey: apiKeyValue,
+                secret: (creds as any).secret || '',
+                passphrase: (creds as any).passphrase || '',
             };
         } catch (error) {
             logger.error('❌ Failed to derive API key:', error);
@@ -105,12 +107,13 @@ export class PolymarketApiKeyManager {
             const creds: ApiKeyCreds = await this.client.createOrDeriveApiKey(nonce);
 
             logger.info('   ✅ API key ready');
-            logger.info(`   - API Key: ${creds.apiKey.substring(0, 10)}...`);
+            const apiKeyValue = (creds as any).apiKey || (creds as any).key || '';
+            logger.info(`   - API Key: ${apiKeyValue.substring(0, 10)}...`);
 
             return {
-                apiKey: creds.apiKey,
-                secret: creds.secret,
-                passphrase: creds.passphrase,
+                apiKey: apiKeyValue,
+                secret: (creds as any).secret || '',
+                passphrase: (creds as any).passphrase || '',
             };
         } catch (error) {
             logger.error('❌ Failed to create/derive API key:', error);
@@ -166,10 +169,11 @@ export class PolymarketApiKeyManager {
             const key: BuilderApiKey = await this.client.createBuilderApiKey();
 
             logger.info('   ✅ Builder API key created successfully');
-            logger.info(`   - API Key: ${key.apiKey.substring(0, 10)}...`);
+            const apiKeyValue = (key as any).apiKey || (key as any).key || '';
+            logger.info(`   - API Key: ${apiKeyValue.substring(0, 10)}...`);
 
             return {
-                apiKey: key.apiKey,
+                apiKey: apiKeyValue,
                 created: Date.now(),
             };
         } catch (error) {

@@ -66,7 +66,7 @@ export class AnalyticsService {
         where.userId = userId;
       }
 
-      const trades = await prisma.trade.findMany({
+      const trades = await (prisma as any).trade.findMany({
         where,
         orderBy: { executedAt: 'asc' },
       });
@@ -78,7 +78,7 @@ export class AnalyticsService {
       }
 
       // Calculate profit/loss for each trade
-      const tradesWithPnL = trades.map(trade => {
+      const tradesWithPnL = trades.map((trade: any) => {
         // Calculate PnL based on side and execution
         // For simplicity: (avgFillPrice - price) * filledAmount - fee
         let pnl = 0;
@@ -145,7 +145,7 @@ export class AnalyticsService {
       if (existing) {
         existing.profit = cumulativeProfit;
       } else {
-        timeline.push({ date, profit: cumulativeProfit });
+        timeline.push({ date: date as string, profit: cumulativeProfit });
       }
     });
 

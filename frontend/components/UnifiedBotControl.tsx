@@ -6,7 +6,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import api from '@/lib/apiClient';
+import { api } from '@/lib/api';
 import useWebSocket from '@/lib/useWebSocket';
 
 interface BotConfig {
@@ -57,10 +57,21 @@ export default function UnifiedBotControl() {
   const fetchBotStatus = async () => {
     try {
       const status = await api.getBotStatus();
+      // Check if this is mock data (backend offline)
+      if (status._mock) {
+        setError('⚠️ Backend is offline - Cannot connect to server. Please ensure backend is running on port 3001.');
+        setDexRunning(false);
+        setPolymarketRunning(false);
+        return;
+      }
       setDexRunning(status.dex?.status === 'RUNNING');
       setPolymarketRunning(status.polymarket?.status === 'RUNNING');
-    } catch (err) {
+      setError(null); // Clear error if connection successful
+    } catch (err: any) {
       console.error('Failed to fetch bot status:', err);
+      setError(`Failed to connect to backend: ${err.message || 'Unknown error'}`);
+      setDexRunning(false);
+      setPolymarketRunning(false);
     }
   };
 
@@ -81,10 +92,12 @@ export default function UnifiedBotControl() {
     setLoading('dex-start');
     try {
       const result = await api.startBot('dex');
-      if (result.success) {
+      if (result.status === 'started' || result.message) {
         setDexRunning(true);
-        showSuccess('DEX bot started successfully!');
+        showSuccess(result.message || 'DEX bot started successfully!');
         refreshBotStatus();
+      } else {
+        showError('Failed to start DEX bot: Unexpected response');
       }
     } catch (err: any) {
       showError(err.message || 'Failed to start DEX bot');
@@ -98,10 +111,12 @@ export default function UnifiedBotControl() {
     setLoading('dex-stop');
     try {
       const result = await api.stopBot('dex');
-      if (result.success) {
+      if (result.status === 'stopped' || result.message) {
         setDexRunning(false);
-        showSuccess('DEX bot stopped');
+        showSuccess(result.message || 'DEX bot stopped');
         refreshBotStatus();
+      } else {
+        showError('Failed to stop DEX bot: Unexpected response');
       }
     } catch (err: any) {
       showError(err.message || 'Failed to stop DEX bot');
@@ -115,10 +130,12 @@ export default function UnifiedBotControl() {
     setLoading('polymarket-start');
     try {
       const result = await api.startBot('polymarket');
-      if (result.success) {
+      if (result.status === 'started' || result.message) {
         setPolymarketRunning(true);
-        showSuccess('Polymarket bot started successfully!');
+        showSuccess(result.message || 'Polymarket bot started successfully!');
         refreshBotStatus();
+      } else {
+        showError('Failed to start Polymarket bot: Unexpected response');
       }
     } catch (err: any) {
       showError(err.message || 'Failed to start Polymarket bot');
@@ -132,10 +149,12 @@ export default function UnifiedBotControl() {
     setLoading('polymarket-stop');
     try {
       const result = await api.stopBot('polymarket');
-      if (result.success) {
+      if (result.status === 'stopped' || result.message) {
         setPolymarketRunning(false);
-        showSuccess('Polymarket bot stopped');
+        showSuccess(result.message || 'Polymarket bot stopped');
         refreshBotStatus();
+      } else {
+        showError('Failed to stop Polymarket bot: Unexpected response');
       }
     } catch (err: any) {
       showError(err.message || 'Failed to stop Polymarket bot');

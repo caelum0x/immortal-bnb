@@ -44,8 +44,15 @@ export async function initializeProvider(): Promise<void> {
   // Initialize PancakeSwap V3 SDK integration
   pancakeSwap = new PancakeSwapV3();
 
-  const balance = await pancakeSwap.getBalance();
-  logger.info(`  - Wallet Balance: ${balance.toFixed(4)} BNB`);
+  // Try to get balance, but don't fail if wallet can't be created
+  try {
+    const balance = await pancakeSwap.getBalance();
+    logger.info(`  - Wallet Balance: ${balance.toFixed(4)} BNB`);
+  } catch (error: any) {
+    logger.warn(`  ⚠️  Could not get wallet balance: ${error.message}`);
+    logger.warn(`     Wallet will be created when needed`);
+  }
+  
   logger.info(`✅ Trading system ready!`);
 }
 
@@ -189,7 +196,7 @@ export async function executeTrade(params: TradeParams): Promise<TradeResult> {
  */
 export class TradeExecutor {
   private provider: ethers.JsonRpcProvider;
-  private wallet: ethers.Wallet;
+  private wallet: ethers.Wallet | null = null;
   private pancakeSwap: PancakeSwapV3;
   private isInitialized = false;
 
@@ -197,14 +204,33 @@ export class TradeExecutor {
     // Initialize provider
     this.provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
     
-    if (!CONFIG.WALLET_PRIVATE_KEY) {
-      throw new Error('WALLET_PRIVATE_KEY not found in environment variables');
-    }
-
-    this.wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY, this.provider);
+    // Lazy wallet initialization - only create when needed
+    // This prevents errors during module load if private key is invalid
     this.pancakeSwap = new PancakeSwapV3();
     
     logger.info(`🔧 Enhanced TradeExecutor initialized for ${CONFIG.TRADING_NETWORK} network`);
+  }
+
+  /**
+   * Get or create wallet instance (lazy initialization)
+   */
+  private getWallet(): ethers.Wallet {
+    if (!this.wallet) {
+      try {
+        const privateKey = CONFIG.WALLET_PRIVATE_KEY;
+        if (!privateKey) {
+          throw new Error('WALLET_PRIVATE_KEY not found in environment variables');
+        }
+        // Normalize private key (ensure 0x prefix)
+        const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+        this.wallet = new ethers.Wallet(normalizedKey, this.provider);
+        logger.info(`✅ TradeExecutor wallet initialized: ${this.wallet.address}`);
+      } catch (error: any) {
+        logger.error(`❌ Failed to create TradeExecutor wallet: ${error.message}`);
+        throw new Error(`TradeExecutor wallet initialization failed: ${error.message}`);
+      }
+    }
+    return this.wallet;
   }
 
   /**
@@ -332,7 +358,7 @@ export class TradeExecutor {
    * Get wallet address
    */
   getWalletAddress(): string {
-    return this.wallet.address;
+    return this.getWallet().address;
   }
 
   /**
@@ -364,8 +390,27 @@ export class TradeExecutor {
   }
 }
 
-// Export singleton instance
-export const tradeExecutorInstance = new TradeExecutor();
+// Export singleton instance - lazy creation to avoid module load errors
+let _tradeExecutorInstance: TradeExecutor | null = null;
+
+export function getTradeExecutorInstance(): TradeExecutor {
+  if (!_tradeExecutorInstance) {
+    try {
+      _tradeExecutorInstance = new TradeExecutor();
+    } catch (error: any) {
+      logger.warn(`⚠️ Could not create TradeExecutor during module load: ${error.message}`);
+      throw error;
+    }
+  }
+  return _tradeExecutorInstance;
+}
+
+// Export singleton for backward compatibility (lazy)
+export const tradeExecutorInstance = new Proxy({} as TradeExecutor, {
+  get(_target, prop) {
+    return getTradeExecutorInstance()[prop as keyof TradeExecutor];
+  }
+});
 
 export default {
   initializeProvider,

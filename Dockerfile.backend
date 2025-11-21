@@ -1,54 +1,51 @@
 # Dockerfile for Immortal AI Trading Bot Backend (TypeScript/Node.js)
-# Multi-stage build for optimized production image
+# Optimized multi-stage build for production
 
 # ============================================================================
 # Stage 1: Dependencies
 # ============================================================================
-FROM node:20-alpine AS deps
-
-# Install system dependencies
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    git \
-    curl
+FROM oven/bun:1-alpine AS deps
 
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json bun.lock* ./
+COPY package.json bun.lockb* ./
 
-# Install dependencies
-RUN npm ci --only=production && \
-    npm cache clean --force
+# Install dependencies (production only)
+RUN bun install --frozen-lockfile --production && \
+    rm -rf /app/.bun/install/cache
 
 # ============================================================================
 # Stage 2: Builder
 # ============================================================================
-FROM node:20-alpine AS builder
+FROM oven/bun:1-alpine AS builder
 
 WORKDIR /app
 
-# Copy dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
+# Copy package files
+COPY package.json bun.lockb* ./
+
+# Install all dependencies (including dev)
+RUN bun install --frozen-lockfile
 
 # Copy source code
 COPY . .
 
-# Build TypeScript code
-RUN npm run build || echo "Build step optional - using ts-node runtime"
+# Build TypeScript (if needed)
+# Note: Bun can run TypeScript directly, but building can optimize
+RUN bun run build || echo "Build optional"
 
 # ============================================================================
 # Stage 3: Runtime
 # ============================================================================
-FROM node:20-alpine AS runtime
+FROM oven/bun:1-alpine AS runtime
 
-# Install runtime dependencies
+# Install runtime dependencies only
 RUN apk add --no-cache \
     curl \
     ca-certificates \
-    tzdata
+    tzdata \
+    postgresql-client
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -56,17 +53,18 @@ RUN addgroup -g 1001 -S nodejs && \
 
 WORKDIR /app
 
-# Copy node_modules from deps
+# Copy production dependencies
 COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
 
-# Copy built application (or source if no build)
-COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist 2>/dev/null || true
+# Copy application files
 COPY --from=builder --chown=nodejs:nodejs /app/src ./src
 COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
+COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist 2>/dev/null || true
 
-# Create logs directory
-RUN mkdir -p /app/logs && chown -R nodejs:nodejs /app/logs
+# Create necessary directories
+RUN mkdir -p /app/logs /app/backups && \
+    chown -R nodejs:nodejs /app
 
 # Switch to non-root user
 USER nodejs
@@ -78,10 +76,11 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3001/health || exit 1
 
-# Environment
+# Environment variables
 ENV NODE_ENV=production \
     API_PORT=3001 \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    BUN_ENV=production
 
-# Start command - use ts-node if no build output, otherwise use dist
-CMD ["sh", "-c", "if [ -d dist ]; then node dist/api/server.js; else npx ts-node src/api/server.ts; fi"]
+# Start command - Bun can run TypeScript directly
+CMD ["bun", "run", "src/api-server.ts"]

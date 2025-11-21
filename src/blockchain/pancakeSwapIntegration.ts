@@ -60,23 +60,49 @@ export class PancakeSwapV3 {
   constructor() {
     this.provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
     
-    // Check if we have a valid private key
+    // Check if we have a valid private key (lazy wallet initialization)
     const privateKey = CONFIG.WALLET_PRIVATE_KEY;
     this.hasValidWallet = !!(privateKey && 
       privateKey !== 'your_test_wallet_private_key_here' &&
       privateKey !== 'your_wallet_private_key_here' &&
       privateKey.length > 20);
 
-    if (this.hasValidWallet) {
-      this.wallet = new ethers.Wallet(privateKey, this.provider);
-      logger.info('🔑 Wallet initialized for trading');
-    } else {
-      this.wallet = null;
+    // Lazy wallet initialization - only create when needed
+    // This prevents errors during module load if private key is invalid
+    this.wallet = null;
+    
+    if (!this.hasValidWallet) {
       logger.warn('⚠️  No valid wallet private key - trading disabled');
       logger.warn('   API endpoints will work, but trade execution will be simulated');
     }
     
     this.chainId = CONFIG.CHAIN_ID;
+  }
+
+  /**
+   * Get or create wallet instance (lazy initialization)
+   */
+  private getWallet(): ethers.Wallet {
+    if (!this.hasValidWallet) {
+      throw new Error('Cannot get wallet - no valid private key configured');
+    }
+    
+    if (!this.wallet) {
+      try {
+        const privateKey = CONFIG.WALLET_PRIVATE_KEY;
+        if (!privateKey) {
+          throw new Error('WALLET_PRIVATE_KEY not set in environment');
+        }
+        // Normalize private key (ensure 0x prefix)
+        const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+        this.wallet = new ethers.Wallet(normalizedKey, this.provider);
+        logger.info(`✅ PancakeSwap wallet initialized: ${this.wallet.address}`);
+      } catch (error: any) {
+        logger.error(`❌ Failed to create PancakeSwap wallet: ${error.message}`);
+        throw new Error(`PancakeSwap wallet initialization failed: ${error.message}`);
+      }
+    }
+    return this.wallet;
 
     // WBNB token
     const wbnbAddress = CONFIG.WBNB_ADDRESS as `0x${string}`;
@@ -349,17 +375,18 @@ export class PancakeSwapV3 {
     isExactInput: boolean;
     isBuyingWithBNB: boolean;
   }): Promise<ethers.ContractTransactionReceipt> {
-    if (!this.hasValidWallet || !this.wallet) {
+    if (!this.hasValidWallet) {
       throw new Error('Cannot execute swap - no wallet configured');
     }
     
-    const router = new ethers.Contract(this.routerAddress, ROUTER_V3_ABI, this.wallet);
+    const wallet = this.getWallet();
+    const router = new ethers.Contract(this.routerAddress, ROUTER_V3_ABI, wallet);
 
     const swapParams = {
       tokenIn: params.tokenIn,
       tokenOut: params.tokenOut,
       fee: params.fee,
-      recipient: this.wallet.address,
+      recipient: wallet.address,
       amountIn: params.amountIn,
       amountOutMinimum: params.amountOutMinimum,
       sqrtPriceLimitX96: 0,
@@ -393,17 +420,18 @@ export class PancakeSwapV3 {
     amount: string,
     decimals: number
   ): Promise<void> {
-    if (!this.hasValidWallet || !this.wallet) {
+    if (!this.hasValidWallet) {
       throw new Error('Cannot approve token - no wallet configured');
     }
     
-    const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+    const wallet = this.getWallet();
+    const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
 
     if (!token.allowance || !token.approve) {
       throw new Error('Token contract methods not available');
     }
 
-    const allowance = await token.allowance(this.wallet.address, this.routerAddress);
+    const allowance = await token.allowance(wallet.address, this.routerAddress);
     const required = ethers.parseUnits(amount, decimals);
 
     if (allowance < required) {
@@ -418,11 +446,12 @@ export class PancakeSwapV3 {
    * Get wallet balance
    */
   async getBalance(): Promise<number> {
-    if (!this.hasValidWallet || !this.wallet) {
+    if (!this.hasValidWallet) {
       logger.warn('🚨 Cannot get balance - no wallet configured');
       return 0;
     }
-    const balance = await this.provider.getBalance(this.wallet.address);
+    const wallet = this.getWallet();
+    const balance = await this.provider.getBalance(wallet.address);
     return parseFloat(ethers.formatEther(balance));
   }
 
@@ -430,18 +459,19 @@ export class PancakeSwapV3 {
    * Get token balance
    */
   async getTokenBalance(tokenAddress: string): Promise<number> {
-    if (!this.hasValidWallet || !this.wallet) {
+    if (!this.hasValidWallet) {
       logger.warn('🚨 Cannot get token balance - no wallet configured');
       return 0;
     }
     
+    const wallet = this.getWallet();
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
     
     if (!token.balanceOf || !token.decimals) {
       throw new Error('Token contract methods not available');
     }
     
-    const balance = await token.balanceOf(this.wallet.address);
+    const balance = await token.balanceOf(wallet.address);
     const decimals = await token.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
   }

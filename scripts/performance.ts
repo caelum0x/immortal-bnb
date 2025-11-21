@@ -142,6 +142,9 @@ function generateReport(metrics: PerformanceMetrics[], period: string): Performa
   // Calculate uptime
   const firstMetric = metrics[0];
   const lastMetric = metrics[metrics.length - 1];
+  if (!firstMetric || !lastMetric) {
+    throw new Error("No metrics available");
+  }
   const uptimeMs = lastMetric.timestamp - firstMetric.timestamp;
   const uptimeStr = formatUptime(uptimeMs);
 
@@ -161,6 +164,9 @@ function generateReport(metrics: PerformanceMetrics[], period: string): Performa
   }
 
   const lastMetrics = metrics[metrics.length - 1];
+  if (!lastMetrics) {
+    throw new Error("No metrics available");
+  }
   const memUsageMB = lastMetrics.systemMetrics.memoryUsage.heapUsed / 1024 / 1024;
 
   if (memUsageMB > 500) {
@@ -236,9 +242,11 @@ async function displayCurrentMetrics(): Promise<void> {
   const memTotalMB = metrics.systemMetrics.memoryUsage.heapTotal / 1024 / 1024;
   console.log(`   Memory: ${memUsageMB.toFixed(2)}MB / ${memTotalMB.toFixed(2)}MB`);
   console.log(`   Uptime: ${formatUptime(metrics.systemMetrics.uptime * 1000)}`);
-  if (process.platform === 'linux') {
+  if (process.platform === 'linux' && metrics.systemMetrics.loadAverage) {
     const [load1, load5, load15] = metrics.systemMetrics.loadAverage;
-    console.log(`   Load Average: ${load1.toFixed(2)}, ${load5.toFixed(2)}, ${load15.toFixed(2)}`);
+    if (load1 !== undefined && load5 !== undefined && load15 !== undefined) {
+      console.log(`   Load Average: ${load1.toFixed(2)}, ${load5.toFixed(2)}, ${load15.toFixed(2)}`);
+    }
   }
   console.log('');
 
@@ -296,8 +304,8 @@ function parsePeriod(period: string): number {
   const match = period.match(/^(\d+)([smhd])$/);
   if (!match) return 3600000; // Default 1 hour
 
-  const value = parseInt(match[1]);
-  const unit = match[2];
+  const value = parseInt(match[1] || '1', 10);
+  const unit = (match[2] || 'h') as string;
 
   switch (unit) {
     case 's':

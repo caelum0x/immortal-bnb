@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import api from '@/lib/apiClient';
+import { api } from '@/lib/api';
 import useWebSocket from '@/lib/useWebSocket';
 
 interface Stats {
@@ -42,15 +42,15 @@ export default function TradingStats() {
       // Use correct API client method
       const data = await api.getPerformanceData();
 
-      // Map backend data to component structure
+      // Map backend data to component structure with null safety
       setStats({
-        totalTrades: data.totalTrades,
-        completedTrades: data.wins + data.losses,
+        totalTrades: data.totalTrades || 0,
+        completedTrades: (data.wins || 0) + (data.losses || 0),
         pendingTrades: 0,
-        profitableTrades: data.wins,
-        losingTrades: data.losses,
-        winRate: data.winRate,
-        totalProfitLoss: data.totalPL,
+        profitableTrades: data.wins || 0,
+        losingTrades: data.losses || 0,
+        winRate: typeof data.winRate === 'number' ? data.winRate : 0,
+        totalProfitLoss: typeof data.totalPL === 'number' ? data.totalPL : 0,
         bestTrade: null, // TODO: Add to backend
         worstTrade: null, // TODO: Add to backend
       });
@@ -123,23 +123,23 @@ export default function TradingStats() {
     },
     {
       label: 'Win Rate',
-      value: `${stats.winRate.toFixed(1)}%`,
-      subtext: `${stats.profitableTrades}W / ${stats.losingTrades}L`,
+      value: `${(stats.winRate || 0).toFixed(1)}%`,
+      subtext: `${stats.profitableTrades || 0}W / ${stats.losingTrades || 0}L`,
       icon: '🎯',
-      gradient: stats.winRate >= 60 ? 'from-green-500 to-emerald-500' : 'from-yellow-500 to-orange-500',
-      bg: stats.winRate >= 60 ? 'from-green-500/10 to-emerald-500/10' : 'from-yellow-500/10 to-orange-500/10',
-      border: stats.winRate >= 60 ? 'border-green-500/30' : 'border-yellow-500/30',
-      textColor: stats.winRate >= 60 ? 'text-green-400' : 'text-yellow-400',
+      gradient: (stats.winRate || 0) >= 60 ? 'from-green-500 to-emerald-500' : 'from-yellow-500 to-orange-500',
+      bg: (stats.winRate || 0) >= 60 ? 'from-green-500/10 to-emerald-500/10' : 'from-yellow-500/10 to-orange-500/10',
+      border: (stats.winRate || 0) >= 60 ? 'border-green-500/30' : 'border-yellow-500/30',
+      textColor: (stats.winRate || 0) >= 60 ? 'text-green-400' : 'text-yellow-400',
     },
     {
       label: 'Total P&L',
-      value: `${stats.totalProfitLoss >= 0 ? '+' : ''}${stats.totalProfitLoss.toFixed(4)} BNB`,
-      subtext: `≈ $${(stats.totalProfitLoss * 600).toFixed(2)} USD`,
-      icon: stats.totalProfitLoss >= 0 ? '📈' : '📉',
-      gradient: stats.totalProfitLoss >= 0 ? 'from-green-500 to-emerald-500' : 'from-red-500 to-rose-500',
-      bg: stats.totalProfitLoss >= 0 ? 'from-green-500/10 to-emerald-500/10' : 'from-red-500/10 to-rose-500/10',
-      border: stats.totalProfitLoss >= 0 ? 'border-green-500/30' : 'border-red-500/30',
-      textColor: stats.totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400',
+      value: `${(stats.totalProfitLoss || 0) >= 0 ? '+' : ''}${(stats.totalProfitLoss || 0).toFixed(4)} BNB`,
+      subtext: `≈ $${((stats.totalProfitLoss || 0) * 600).toFixed(2)} USD`,
+      icon: (stats.totalProfitLoss || 0) >= 0 ? '📈' : '📉',
+      gradient: (stats.totalProfitLoss || 0) >= 0 ? 'from-green-500 to-emerald-500' : 'from-red-500 to-rose-500',
+      bg: (stats.totalProfitLoss || 0) >= 0 ? 'from-green-500/10 to-emerald-500/10' : 'from-red-500/10 to-rose-500/10',
+      border: (stats.totalProfitLoss || 0) >= 0 ? 'border-green-500/30' : 'border-red-500/30',
+      textColor: (stats.totalProfitLoss || 0) >= 0 ? 'text-green-400' : 'text-red-400',
     },
     {
       label: 'Pending Trades',
@@ -286,14 +286,14 @@ export default function TradingStats() {
             <div className="text-xs text-slate-500 mt-1">Completed</div>
           </div>
           <div>
-            <div className={`text-2xl font-bold ${stats.winRate >= 60 ? 'text-green-400' : 'text-yellow-400'}`}>
-              {stats.winRate.toFixed(1)}%
+            <div className={`text-2xl font-bold ${(stats.winRate || 0) >= 60 ? 'text-green-400' : 'text-yellow-400'}`}>
+              {(stats.winRate || 0).toFixed(1)}%
             </div>
             <div className="text-xs text-slate-500 mt-1">Win Rate</div>
           </div>
           <div>
-            <div className={`text-2xl font-bold ${stats.totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {stats.totalProfitLoss >= 0 ? '+' : ''}{stats.totalProfitLoss.toFixed(2)}
+            <div className={`text-2xl font-bold ${(stats.totalProfitLoss || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {(stats.totalProfitLoss || 0) >= 0 ? '+' : ''}{(stats.totalProfitLoss || 0).toFixed(2)}
             </div>
             <div className="text-xs text-slate-500 mt-1">Total P&L (BNB)</div>
           </div>

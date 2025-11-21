@@ -296,7 +296,7 @@ export class RiskManagementService {
       const where: any = { status: 'SETTLED' };
       if (userId) where.userId = userId;
 
-      const trades = await prisma.trade.findMany({
+      const trades = await (prisma as any).trade.findMany({
         where,
         orderBy: { executedAt: 'desc' },
         take: 100,
@@ -305,13 +305,13 @@ export class RiskManagementService {
       if (trades.length < 10) return 0;
 
       // Calculate returns
-      const returns = trades.map(t => {
+      const returns = trades.map((t: any) => {
         const pnl = (t.avgFillPrice - t.price) * t.filledAmount - t.fee;
         return pnl;
       });
 
-      const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
-      const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
+      const avgReturn = returns.reduce((a: number, b: number) => a + b, 0) / returns.length;
+      const variance = returns.reduce((sum: number, r: number) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
       const stdDev = Math.sqrt(variance);
 
       const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(252) : 0;
@@ -332,7 +332,7 @@ export class RiskManagementService {
       const where: any = { status: 'SETTLED' };
       if (userId) where.userId = userId;
 
-      const trades = await prisma.trade.findMany({
+      const trades = await (prisma as any).trade.findMany({
         where,
         orderBy: { executedAt: 'asc' },
       });
@@ -343,7 +343,7 @@ export class RiskManagementService {
       let peak = 0;
       let runningPL = 0;
 
-      trades.forEach(trade => {
+      trades.forEach((trade: any) => {
         const pnl = (trade.avgFillPrice - trade.price) * trade.filledAmount - trade.fee;
         runningPL += pnl;
 

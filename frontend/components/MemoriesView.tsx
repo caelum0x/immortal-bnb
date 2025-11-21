@@ -18,8 +18,12 @@ export default function MemoriesView() {
     { interval: 60000 } // Refresh every minute
   );
 
-  const filteredMemories = (memories || [])
-    .sort((a: TradeMemory, b: TradeMemory) => b.timestamp - a.timestamp)
+  // Ensure memories is always an array
+  const safeMemories = Array.isArray(memories) ? memories : [];
+  
+  const filteredMemories = safeMemories
+    .filter((memory: TradeMemory) => memory && typeof memory === 'object') // Filter out invalid entries
+    .sort((a: TradeMemory, b: TradeMemory) => (b?.timestamp || 0) - (a?.timestamp || 0))
     .filter((memory: TradeMemory) => {
       if (filter === 'all') return true;
       return memory.outcome === filter;
@@ -93,7 +97,7 @@ export default function MemoriesView() {
           <div>
             <h2 className="text-2xl font-bold mb-2">🧠 Trading Memories</h2>
             <p className="text-gray-400">
-              Immortal memory stored on BNB Greenfield - {memories?.length || 0} total
+              Immortal memory stored on BNB Greenfield - {safeMemories.length} total
             </p>
           </div>
           <button

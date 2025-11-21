@@ -11,6 +11,9 @@ async function main() {
 
   // Get deployer
   const [deployer] = await ethers.getSigners();
+  if (!deployer) {
+    throw new Error("No deployer account found");
+  }
   console.log(`Deploying with account: ${deployer.address}`);
 
   // Check balance
@@ -39,7 +42,12 @@ async function main() {
   console.log(`Network: ${(await ethers.provider.getNetwork()).name}`);
   console.log(`Chain ID: ${(await ethers.provider.getNetwork()).chainId}`);
   console.log(`Deployer: ${deployer.address}`);
-  console.log(`Total Supply: ${ethers.formatEther(await token.totalSupply())} IMMBOT`);
+  const totalSupplyMethod = (token as any).totalSupply;
+  if (!totalSupplyMethod) {
+    throw new Error("totalSupply method not available");
+  }
+  const totalSupply = await totalSupplyMethod();
+  console.log(`Total Supply: ${ethers.formatEther(totalSupply)} IMMBOT`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
   // Wait for block confirmations (for verification)

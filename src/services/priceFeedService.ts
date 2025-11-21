@@ -146,8 +146,11 @@ class PriceFeedService extends EventEmitter {
       );
 
       if (intervalPrices.length > 0) {
-        const open = intervalPrices[0].price;
-        const close = intervalPrices[intervalPrices.length - 1].price;
+        const open = intervalPrices[0]?.price;
+        const close = intervalPrices[intervalPrices.length - 1]?.price;
+        if (open === undefined || close === undefined) {
+          continue;
+        }
         const high = Math.max(...intervalPrices.map((p) => p.price));
         const low = Math.min(...intervalPrices.map((p) => p.price));
         const volume = intervalPrices.reduce((sum, p) => sum + (p.volume || 0), 0);
@@ -364,8 +367,11 @@ class PriceFeedService extends EventEmitter {
       totalEntries += history.length;
 
       if (history.length > 0) {
-        const firstTimestamp = history[0].timestamp;
-        const lastTimestamp = history[history.length - 1].timestamp;
+        const firstTimestamp = history[0]?.timestamp;
+        const lastTimestamp = history[history.length - 1]?.timestamp;
+        if (firstTimestamp === undefined || lastTimestamp === undefined) {
+          continue;
+        }
 
         if (oldest === null || firstTimestamp < oldest) {
           oldest = firstTimestamp;

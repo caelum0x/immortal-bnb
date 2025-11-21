@@ -3,9 +3,9 @@
  * Communicates with the Python Polymarket Agents API microservice
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { type AxiosInstance, type AxiosError } from 'axios';
 import { logger } from '../utils/logger.js';
-import { config } from '../config.js';
+import { CONFIG } from '../config.js';
 
 export interface MarketAnalysisRequest {
     market_id?: string;
@@ -75,8 +75,8 @@ export class PythonBridge {
     private healthCheckInterval: number = 60000; // 1 minute
 
     constructor(baseURL?: string, apiKey?: string) {
-        this.baseURL = baseURL || config.PYTHON_API_URL || 'http://localhost:5000';
-        this.apiKey = apiKey || config.PYTHON_API_KEY;
+        this.baseURL = baseURL || CONFIG.PYTHON_API_URL || 'http://localhost:5000';
+        this.apiKey = apiKey || CONFIG.PYTHON_API_KEY;
 
         this.client = axios.create({
             baseURL: this.baseURL,
@@ -111,8 +111,10 @@ export class PythonBridge {
             }
         );
 
-        // Initial health check
-        this.checkHealth();
+        // Initial health check (non-blocking, don't log errors)
+        this.checkHealth().catch(() => {
+            // Silently fail - Python API is optional
+        });
     }
 
     /**
@@ -120,12 +122,16 @@ export class PythonBridge {
      */
     private handleError(error: AxiosError): void {
         if (error.response) {
-            logger.error(`🐍 Python API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            // Don't log 403/404 as errors - Python API is optional
+            if (error.response.status === 403 || error.response.status === 404) {
+                logger.debug(`🐍 Python API not available (${error.response.status}) - This is optional`);
+            } else {
+                logger.warn(`🐍 Python API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            }
         } else if (error.request) {
-            logger.error(`🐍 Python API Error: No response received - ${error.message}`);
-            logger.error(`⚠️  Is the Python API server running at ${this.baseURL}?`);
+            logger.debug(`🐍 Python API not available at ${this.baseURL} - This is optional`);
         } else {
-            logger.error(`🐍 Python API Error: ${error.message}`);
+            logger.debug(`🐍 Python API Error: ${error.message}`);
         }
     }
 
@@ -141,14 +147,24 @@ export class PythonBridge {
             if (this.isHealthy) {
                 logger.info(`✅ Python API is healthy at ${this.baseURL}`);
             } else {
-                logger.warn(`⚠️  Python API health check failed`);
+                logger.debug(`⚠️  Python API health check returned unhealthy`);
             }
 
             return this.isHealthy;
-        } catch (error) {
+        } catch (error: any) {
             this.isHealthy = false;
             this.lastHealthCheck = Date.now();
-            logger.error(`❌ Python API health check failed: ${error}`);
+            // Don't log as error - Python API is optional
+            // Only log if it's a real error (not 403/404/connection refused/ECONNREFUSED)
+            const status = error.response?.status;
+            const isOptionalError = !status || [403, 404].includes(status) || 
+                                   error.code === 'ECONNREFUSED' || 
+                                   error.message?.includes('ECONNREFUSED');
+            
+            if (!isOptionalError) {
+                logger.warn(`⚠️  Python API health check failed: ${status || error.message}`);
+            }
+            // Silently ignore optional errors (403, 404, connection refused)
             return false;
         }
     }

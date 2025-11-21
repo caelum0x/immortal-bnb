@@ -81,3 +81,54 @@ export const validateTradeExecution = [
   body('amount').isFloat({ min: 0.01 }),
   handleValidationErrors,
 ];
+
+// Start bot validation
+export const validateStartBot = [
+  body('tokens').isArray().withMessage('Tokens must be an array'),
+  body('tokens.*').optional().isString().isLength({ min: 42, max: 42 }),
+  body('risk').optional().isIn(['low', 'medium', 'high']),
+  handleValidationErrors,
+];
+
+// Trade logs query validation
+export const validateTradeLogsQuery = [
+  query('limit').optional().isInt({ min: 1, max: 1000 }),
+  query('offset').optional().isInt({ min: 0 }),
+  query('tokenAddress').optional().isString().isLength({ min: 42, max: 42 }),
+  handleValidationErrors,
+];
+
+// Memories query validation (alias for validateMemoryQuery)
+export const validateMemoriesQuery = validateMemoryQuery;
+
+// Discover tokens query validation
+export const validateDiscoverTokensQuery = [
+  query('limit').optional().isInt({ min: 1, max: 100 }),
+  handleValidationErrors,
+];
+
+// Request sanitization middleware
+export function sanitizeRequest(req: Request, res: Response, next: NextFunction) {
+  // Basic XSS protection - sanitize string inputs
+  if (req.body && typeof req.body === 'object') {
+    const sanitize = (obj: any): any => {
+      if (typeof obj === 'string') {
+        // Remove potentially dangerous characters
+        return obj.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+      }
+      if (Array.isArray(obj)) {
+        return obj.map(sanitize);
+      }
+      if (obj && typeof obj === 'object') {
+        const sanitized: any = {};
+        for (const key in obj) {
+          sanitized[key] = sanitize(obj[key]);
+        }
+        return sanitized;
+      }
+      return obj;
+    };
+    req.body = sanitize(req.body);
+  }
+  next();
+}

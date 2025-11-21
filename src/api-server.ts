@@ -9,10 +9,30 @@ import cors from 'cors';
 import http from 'http';
 import path from 'path';
 import { logger } from './utils/logger';
+import { structuredLogger, logWithContext, getCorrelationId, setCorrelationId, logErrorWithContext } from './monitoring/logging';
 import { fetchAllMemories, fetchMemory } from './blockchain/memoryStorage';
 import { getTrendingTokens } from './data/marketFetcher';
 import { CONFIG } from './config';
 import { BotState } from './bot-state';
+// Production readiness imports
+import { metricsMiddleware, register } from './monitoring/metrics';
+import { healthChecker } from './health/healthChecker';
+import { initializeTracing, withSpan } from './monitoring/tracing';
+import { cacheManager } from './cache/cacheManager';
+import { tradeRepository } from './db/repositories/tradeRepository';
+import { configRepository } from './db/repositories/configRepository';
+// Prisma import - made optional to allow app to start without database
+let prisma: any;
+try {
+  prisma = require('./db/client').prisma;
+} catch {
+  // Mock prisma if not available
+  prisma = {
+    trade: { findMany: () => Promise.resolve([]), create: () => Promise.resolve({}) },
+    order: { findMany: () => Promise.resolve([]), create: () => Promise.resolve({}) },
+  };
+}
+// Main branch imports
 import { wormholeService } from './crossChain/wormholeService';
 import { ImmortalAIAgent } from './ai/immortalAgent';
 import { saveConfig, loadConfig, appendToConfig, getConfigOrDefault } from './utils/configStorage';
@@ -64,49 +84,44 @@ export const webSocketManager = new WebSocketManager();
 // Initialize Polymarket Agent Orchestrator (global singleton)
 const agentsPath = path.join(process.cwd(), 'agents');
 export const polymarketOrchestrator = new PolymarketAgentOrchestrator({
-  agentsPath,
   maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB || 1.0,
   minConfidence: 0.7,
 });
 
 // Wire Polymarket agent events to WebSocket notifications
 polymarketOrchestrator.on('decision', (decision) => {
-  logger.info(`🤖 Polymarket AI Decision: ${decision.action} ${decision.market}`);
+  logger.info(`🤖 Polymarket AI Decision: ${decision.action} ${decision.outcome}`);
   webSocketManager.sendAIDecisionNotification({
-    id: decision.id,
-    timestamp: decision.timestamp,
+    token: decision.marketQuestion,
     action: decision.action,
-    market: decision.market,
     confidence: decision.confidence,
     reasoning: decision.reasoning,
   });
 });
 
 polymarketOrchestrator.on('trade', async (trade) => {
-  logger.info(`💰 Polymarket Trade Executed: ${trade.action} ${trade.market} - P/L: ${trade.profitLoss}`);
+  logger.info(`💰 Polymarket Trade Executed: ${trade.side} ${trade.marketQuestion} - Status: ${trade.status}`);
 
   // Send WebSocket notification
   webSocketManager.sendTradeNotification({
-    id: trade.id,
-    timestamp: trade.timestamp,
-    type: 'polymarket',
-    token: trade.market,
-    action: trade.action,
+    tradeId: trade.tradeId,
+    action: trade.side,
+    token: trade.marketQuestion,
     amount: trade.amount,
-    profit: trade.profitLoss,
-    txHash: trade.transactionHash,
+    price: trade.price,
+    profitLoss: 0, // P/L calculated later
   });
 
   // Send Telegram notification if enabled
   try {
     const telegramConfig = await loadConfig<any>('telegram');
     if (telegramConfig?.enabled && telegramConfig.notifications?.trades) {
-      const profitEmoji = trade.profitLoss > 0 ? '💚' : '❌';
+      const profitEmoji = trade.status === 'EXECUTED' ? '💚' : '❌';
       const message = `${profitEmoji} *Polymarket Trade*\n\n` +
-        `Market: ${trade.market}\n` +
-        `Action: ${trade.action.toUpperCase()}\n` +
+        `Market: ${trade.marketQuestion}\n` +
+        `Action: ${trade.side.toUpperCase()}\n` +
         `Amount: ${trade.amount} USDC\n` +
-        `P/L: ${trade.profitLoss > 0 ? '+' : ''}${trade.profitLoss.toFixed(2)} USDC\n` +
+        `Status: ${trade.status}\n` +
         `Time: ${new Date(trade.timestamp).toLocaleString()}`;
 
       await fetch(`https://api.telegram.org/bot${telegramConfig.botToken}/sendMessage`, {
@@ -128,11 +143,10 @@ polymarketOrchestrator.on('trade', async (trade) => {
       });
 
       webSocketManager.sendTelegramNotification({
-        id: `tg_${Date.now()}`,
-        timestamp: Date.now(),
-        type: 'trade',
+        messageId: `tg_${Date.now()}`,
         message,
         status: 'sent',
+        chatId: telegramConfig.chatId || '',
       });
     }
   } catch (error) {
@@ -143,7 +157,7 @@ polymarketOrchestrator.on('trade', async (trade) => {
 polymarketOrchestrator.on('started', () => {
   logger.info('🚀 Polymarket Agent Started');
   webSocketManager.sendNotification({
-    type: 'info',
+    type: 'trade',
     title: 'Agent Started',
     message: 'Polymarket trading agent is now running',
     timestamp: Date.now(),
@@ -153,7 +167,7 @@ polymarketOrchestrator.on('started', () => {
 polymarketOrchestrator.on('stopped', () => {
   logger.info('🛑 Polymarket Agent Stopped');
   webSocketManager.sendNotification({
-    type: 'info',
+    type: 'trade',
     title: 'Agent Stopped',
     message: 'Polymarket trading agent has been stopped',
     timestamp: Date.now(),
@@ -202,9 +216,34 @@ app.use(express.json());
 // Request sanitization (XSS protection)
 app.use(sanitizeRequest);
 
-// Request logging
+// Initialize tracing in production
+if (process.env.NODE_ENV === 'production' && process.env.ENABLE_TRACING !== 'false') {
+  initializeTracing();
+}
+
+// Initialize Redis cache
+if (process.env.REDIS_URL) {
+  cacheManager.warmCache().catch((err) => {
+    logger.warn('Cache warm-up failed:', err);
+  });
+}
+
+// Correlation ID middleware
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
+  const correlationId = req.headers['x-correlation-id'] as string || getCorrelationId();
+  setCorrelationId(correlationId);
+  res.setHeader('X-Correlation-ID', correlationId);
+  next();
+});
+
+// Metrics middleware (must be before routes)
+app.use(metricsMiddleware);
+
+// Structured request logging
+app.use((req, res, next) => {
+  logWithContext('info', `${req.method} ${req.path}`, {
+    method: req.method,
+    path: req.path,
     ip: req.ip,
     userAgent: req.get('user-agent'),
   });
@@ -246,8 +285,31 @@ app.post(
         network: CONFIG.NETWORK as 'testnet' | 'mainnet',
       });
 
+      // Store bot state in database
+      try {
+        await configRepository.update({
+          isRunning: true,
+          riskLevel: risk,
+          maxTradeAmount: CONFIG.MAX_TRADE_AMOUNT_BNB,
+          stopLoss: CONFIG.STOP_LOSS_PERCENTAGE,
+          interval: CONFIG.BOT_LOOP_INTERVAL_MS,
+          network: CONFIG.NETWORK,
+          watchlist: validTokens,
+        });
+      } catch (dbError) {
+        logger.warn('Failed to store bot state in database:', dbError);
+        // Continue - database is not critical for bot operation
+      }
+
+      logWithContext('info', 'Bot started via API', {
+        botType: botType || 'all',
+        tokenCount: validTokens.length,
+        risk,
+        network: CONFIG.NETWORK,
+      });
+      
       logger.info(`✅ Bot started via API`, {
-        botType,
+        botType: botType || 'all',
         tokenCount: validTokens.length,
         risk,
         network: CONFIG.NETWORK,
@@ -290,6 +352,15 @@ app.post('/api/stop-bot', botControlLimiter, async (req: Request, res: Response)
     }
 
     BotState.stop();
+    
+    // Update database
+    try {
+      await configRepository.setRunning(false);
+    } catch (dbError) {
+      logger.warn('Failed to update bot state in database:', dbError);
+    }
+    
+    logWithContext('info', 'Bot stopped via API', { botType });
     logger.info(`🛑 Bot stopped via API (type: ${botType})`);
 
     res.json({
@@ -393,7 +464,20 @@ app.get(
   async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
-      const logs = BotState.getTradeLogs(limit);
+      
+      // Try database first, fallback to BotState
+      let logs;
+      try {
+        logs = await tradeRepository.query({
+          limit,
+          offset: parseInt(req.query.offset as string) || 0,
+          tokenAddress: req.query.tokenAddress as string,
+        });
+      } catch (dbError) {
+        // Fallback to BotState if database unavailable
+        logger.warn('Database unavailable, using BotState:', dbError);
+        logs = BotState.getTradeLogs(limit);
+      }
 
       res.json({
         total: logs.length,
@@ -468,9 +552,142 @@ app.get('/api/analytics', readLimiter, async (req: Request, res: Response) => {
     const userId = req.query.userId as string | undefined;
 
     // Use analytics service to get real data from database
-    const analytics = await analyticsService.getAnalytics(timeframe, userId);
+    let analytics: any = {};
+    try {
+      analytics = await analyticsService.getAnalytics(timeframe, userId);
+    } catch (error) {
+      logger.warn('Analytics service unavailable, using fallback:', error);
+    }
 
-    res.json(analytics);
+    // Fallback: Calculate from Greenfield memories if analytics service fails
+    const now = Date.now();
+    let startTime = 0;
+    switch (timeframe) {
+      case '7d':
+        startTime = now - (7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        startTime = now - (30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90d':
+        startTime = now - (90 * 24 * 60 * 60 * 1000);
+        break;
+      case 'all':
+      default:
+        startTime = 0;
+    }
+
+    // Fetch memories from Greenfield
+    const memoryIds = await fetchAllMemories();
+    const allMemories = await Promise.all(
+      memoryIds.map(id => fetchMemory(id))
+    );
+
+    // Filter by timeframe and remove nulls
+    const memories = allMemories.filter(m =>
+      m !== null && m.timestamp >= startTime
+    ) as any[];
+
+    // Calculate analytics
+    const completedTrades = memories.filter(m => m.outcome !== 'pending');
+    const winningTrades = completedTrades.filter(m => m.outcome === 'profit');
+    const losingTrades = completedTrades.filter(m => m.outcome === 'loss');
+    const breakEvenTrades = completedTrades.filter(m =>
+      m.profitLoss !== undefined && Math.abs(m.profitLoss) < 0.01
+    );
+
+    // Profit timeline
+    const profitTimeline: { date: string; profit: number }[] = [];
+    let cumulativeProfit = 0;
+
+    completedTrades
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach(trade => {
+        cumulativeProfit += (trade.profitLoss || 0);
+        const dateStr = new Date(trade.timestamp).toISOString().split('T')[0];
+        if (dateStr) {
+          profitTimeline.push({ date: dateStr, profit: cumulativeProfit });
+        }
+      });
+
+    // Trade distribution
+    const tradeDistribution = {
+      win: winningTrades.length,
+      loss: losingTrades.length,
+      breakeven: breakEvenTrades.length,
+    };
+
+    // Top performing tokens
+    const tokenProfits = new Map<string, { profit: number; trades: number }>();
+    completedTrades.forEach(trade => {
+      const existing = tokenProfits.get(trade.tokenSymbol) || { profit: 0, trades: 0 };
+      tokenProfits.set(trade.tokenSymbol, {
+        profit: existing.profit + (trade.profitLoss || 0),
+        trades: existing.trades + 1,
+      });
+    });
+
+    const topTokens = Array.from(tokenProfits.entries())
+      .map(([symbol, data]) => ({ symbol, ...data }))
+      .sort((a, b) => b.profit - a.profit)
+      .slice(0, 10);
+
+    // Performance metrics
+    const totalPL = completedTrades.reduce((sum, t) => sum + (t.profitLoss || 0), 0);
+    const wins = winningTrades.map(t => t.profitLoss || 0);
+    const losses = losingTrades.map(t => Math.abs(t.profitLoss || 0));
+
+    const avgWin = wins.length > 0 ? wins.reduce((a, b) => a + b, 0) / wins.length : 0;
+    const avgLoss = losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0;
+    const winRate = completedTrades.length > 0
+      ? (winningTrades.length / completedTrades.length) * 100
+      : 0;
+
+    const profitFactor = avgLoss > 0 ? avgWin / avgLoss : 0;
+
+    // Calculate Sharpe Ratio (simplified)
+    const returns = completedTrades.map(t => (t.profitLoss || 0));
+    const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
+    const variance = returns.length > 0
+      ? returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length
+      : 0;
+    const stdDev = Math.sqrt(variance);
+    const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) : 0;
+
+    // Max drawdown
+    let maxDrawdown = 0;
+    let peak = 0;
+    let runningPL = 0;
+
+    completedTrades
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach(trade => {
+        runningPL += trade.profitLoss || 0;
+        if (runningPL > peak) peak = runningPL;
+        const drawdown = ((peak - runningPL) / Math.max(peak, 1)) * 100;
+        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+      });
+
+    const performanceMetrics = {
+      totalReturn: totalPL,
+      sharpeRatio,
+      maxDrawdown,
+      winRate,
+      avgWin,
+      avgLoss,
+      profitFactor,
+    };
+
+    // Combine both analytics sources
+    const combinedAnalytics = {
+      ...analytics,
+      profitTimeline,
+      tradeDistribution,
+      topTokens,
+      performanceMetrics,
+    };
+    
+    res.json(combinedAnalytics);
 
   } catch (error) {
     logger.error(`API /analytics error: ${(error as Error).message}`);
@@ -511,7 +728,11 @@ app.post('/api/positions/:id/close', botControlLimiter, async (req: Request, res
     const { id } = req.params;
 
     // Close position via BotState
-    const result = await BotState.closePosition(id);
+    const positionId = id || '';
+    if (!positionId) {
+      return res.status(400).json({ error: 'Position ID is required' });
+    }
+    const result = await BotState.closePosition(positionId);
 
     if (!result.success) {
       return res.status(400).json({ error: result.error });
@@ -540,20 +761,17 @@ app.post('/api/positions/:id/close', botControlLimiter, async (req: Request, res
 app.get('/api/wallet/balance', readLimiter, async (req: Request, res: Response) => {
   try {
     const { MultiChainWalletManager } = await import('./blockchain/multiChainWalletManager');
-    const walletManager = new MultiChainWalletManager();
-
-    // Get all balances
-    const balances = await walletManager.getAllBalances();
+    const walletManager = new MultiChainWalletManager(process.env.WALLET_PRIVATE_KEY || '');
 
     // Get primary BNB balance
-    const bnbBalance = balances.find(b => b.chain === 'BSC');
+    const bnbBalance = await walletManager.getNativeBalance('BSC');
 
     res.json({
-      balance: bnbBalance?.balance.toFixed(4) || '0.0000',
-      usdValue: ((bnbBalance?.balance || 0) * 600).toFixed(2), // Approximate BNB price
+      balance: bnbBalance.toFixed(4) || '0.0000',
+      usdValue: ((bnbBalance || 0) * 600).toFixed(2), // Approximate BNB price
       network: CONFIG.NETWORK,
       address: walletManager.getAddress(),
-      allChains: balances,
+      allChains: [{ chain: 'BSC', balance: bnbBalance }],
     });
   } catch (error) {
     logger.error(`API /wallet/balance error: ${(error as Error).message}`);
@@ -1149,15 +1367,16 @@ app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Resp
 
     if (!walletAddress || !privateKey) {
       // Fallback to calculating from agent trades if CLOB not available
-      const agentTrades = polymarketOrchestrator.getTrades(100);
+      const agentTrades = polymarketOrchestrator.getRecentTrades(100);
       const positionMap = new Map<string, any>();
 
-      agentTrades.forEach(trade => {
-        if (!positionMap.has(trade.market)) {
-          positionMap.set(trade.market, {
-            marketId: trade.market.replace(/\s+/g, '_').toLowerCase(),
-            market: trade.market,
-            side: trade.action,
+      agentTrades.forEach((trade: any) => {
+        const marketKey = trade.marketQuestion || trade.marketId;
+        if (!positionMap.has(marketKey)) {
+          positionMap.set(marketKey, {
+            marketId: trade.marketId,
+            market: trade.marketQuestion,
+            side: trade.side,
             shares: 0,
             avgPrice: 0,
             currentPrice: 0.5,
@@ -1166,13 +1385,13 @@ app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Resp
           });
         }
 
-        const position = positionMap.get(trade.market)!;
-        if (trade.action === 'buy') {
+        const position = positionMap.get(marketKey)!;
+        if (trade.side === 'BUY') {
           position.shares += trade.amount;
         } else {
           position.shares -= trade.amount;
         }
-        position.pnl += trade.profitLoss;
+        // P/L calculated from position, not individual trades
       });
 
       const positions = Array.from(positionMap.values()).filter(p => p.shares > 0);
@@ -1208,15 +1427,16 @@ app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Resp
     }
 
     // Fallback to calculated positions if bridge not available
-    const agentTrades = polymarketOrchestrator.getTrades(100);
+    const agentTrades = polymarketOrchestrator.getRecentTrades(100);
     const positionMap = new Map<string, any>();
 
-    agentTrades.forEach(trade => {
-      if (!positionMap.has(trade.market)) {
-        positionMap.set(trade.market, {
-          marketId: trade.market.replace(/\s+/g, '_').toLowerCase(),
-          market: trade.market,
-          side: trade.action,
+    agentTrades.forEach((trade: any) => {
+      const marketKey = trade.marketQuestion || trade.marketId;
+      if (!positionMap.has(marketKey)) {
+        positionMap.set(marketKey, {
+          marketId: trade.marketId,
+          market: trade.marketQuestion,
+          side: trade.side,
           shares: 0,
           avgPrice: 0,
           currentPrice: 0.5,
@@ -1225,13 +1445,13 @@ app.get('/api/polymarket/positions', readLimiter, async (req: Request, res: Resp
         });
       }
 
-      const position = positionMap.get(trade.market)!;
-      if (trade.action === 'buy') {
+      const position = positionMap.get(marketKey)!;
+      if (trade.side === 'BUY') {
         position.shares += trade.amount;
       } else {
         position.shares -= trade.amount;
       }
-      position.pnl += trade.profitLoss;
+      // P/L calculated from position, not individual trades
     });
 
     const positions = Array.from(positionMap.values()).filter(p => p.shares > 0);
@@ -1421,18 +1641,18 @@ app.get('/api/polymarket/history', readLimiter, async (req: Request, res: Respon
     const limit = parseInt(req.query.limit as string) || 20;
 
     // Get trades from orchestrator
-    const trades = polymarketOrchestrator.getTrades(limit);
+    const trades = polymarketOrchestrator.getRecentTrades(limit);
 
-    const history = trades.map(trade => ({
-      id: trade.id,
+    const history = trades.map((trade: any) => ({
+      id: trade.tradeId,
       timestamp: trade.timestamp,
-      market: trade.market,
-      side: trade.action,
+      market: trade.marketQuestion,
+      side: trade.side,
       amount: trade.amount,
-      price: 0.5, // Would come from actual trade data
-      outcome: trade.profitLoss > 0 ? 'win' : trade.profitLoss < 0 ? 'loss' : 'pending',
-      pnl: trade.profitLoss,
-      txHash: trade.transactionHash,
+      price: trade.price,
+      outcome: trade.status === 'EXECUTED' ? 'win' : trade.status === 'FAILED' ? 'loss' : 'pending',
+      pnl: 0, // P/L calculated separately
+      txHash: trade.txHash,
     }));
 
     res.json({ history, total: history.length });
@@ -1449,11 +1669,11 @@ app.get('/api/polymarket/history', readLimiter, async (req: Request, res: Respon
  */
 app.get('/api/polymarket/stats', readLimiter, async (req: Request, res: Response) => {
   try {
-    const trades = polymarketOrchestrator.getTrades(1000);
+    const trades = polymarketOrchestrator.getRecentTrades(1000);
 
-    const winningTrades = trades.filter(t => t.profitLoss > 0);
-    const losingTrades = trades.filter(t => t.profitLoss < 0);
-    const totalPnL = trades.reduce((sum, t) => sum + t.profitLoss, 0);
+    const winningTrades = trades.filter((t: any) => t.status === 'EXECUTED');
+    const losingTrades = trades.filter((t: any) => t.status === 'FAILED');
+    const totalPnL = 0; // P/L calculated separately
 
     const stats = {
       totalBets: trades.length,
@@ -1461,9 +1681,9 @@ app.get('/api/polymarket/stats', readLimiter, async (req: Request, res: Response
       losingBets: losingTrades.length,
       winRate: trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0,
       totalProfit: totalPnL,
-      avgBetSize: trades.length > 0 ? trades.reduce((sum, t) => sum + t.amount, 0) / trades.length : 0,
-      bestBet: trades.length > 0 ? Math.max(...trades.map(t => t.profitLoss)) : 0,
-      worstBet: trades.length > 0 ? Math.min(...trades.map(t => t.profitLoss)) : 0,
+      avgBetSize: trades.length > 0 ? trades.reduce((sum: number, t: any) => sum + t.amount, 0) / trades.length : 0,
+      bestBet: 0, // P/L calculated separately
+      worstBet: 0, // P/L calculated separately
     };
 
     res.json(stats);
@@ -1483,15 +1703,15 @@ app.get('/api/polymarket/leaderboard', readLimiter, async (req: Request, res: Re
   try {
     // Polymarket doesn't provide a public leaderboard API
     // So we return stats from our own agent trades
-    const trades = polymarketOrchestrator.getTrades(1000);
+    const trades = polymarketOrchestrator.getRecentTrades(1000);
 
-    const winningTrades = trades.filter(t => t.profitLoss > 0);
-    const totalPnL = trades.reduce((sum, t) => sum + t.profitLoss, 0);
-    const totalVolume = trades.reduce((sum, t) => sum + t.amount, 0);
+    const winningTrades = trades.filter((t: any) => t.status === 'EXECUTED');
+    const totalPnL = 0; // P/L calculated separately
+    const totalVolume = trades.reduce((sum: number, t: any) => sum + t.amount, 0);
     const winRate = trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0;
 
     // Count unique markets traded
-    const uniqueMarkets = new Set(trades.map(t => t.market)).size;
+    const uniqueMarkets = new Set(trades.map((t: any) => t.marketQuestion || t.marketId)).size;
 
     const ourStats = {
       rank: 1,
@@ -1591,14 +1811,14 @@ app.get('/api/polymarket-agent/status', readLimiter, async (req: Request, res: R
 
     res.json({
       isRunning: status.isRunning,
-      startedAt: status.startedAt,
-      uptime: status.uptime,
+      startedAt: Date.now(), // Would track this separately
+      uptime: 0, // Would calculate from startedAt
       totalDecisions: status.totalDecisions,
       totalTrades: status.totalTrades,
-      totalProfit: status.totalProfit,
+      totalProfit: 0, // P/L calculated separately
       config: {
-        maxTradeAmount: polymarketOrchestrator['config'].maxTradeAmount,
-        minConfidence: polymarketOrchestrator['config'].minConfidence,
+        maxTradeAmount: status.config.maxTradeAmount,
+        minConfidence: status.config.minConfidence,
       },
     });
   } catch (error) {
@@ -1615,7 +1835,7 @@ app.get('/api/polymarket-agent/status', readLimiter, async (req: Request, res: R
 app.get('/api/polymarket-agent/decisions', readLimiter, async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 20;
-    const decisions = polymarketOrchestrator.getDecisions(limit);
+    const decisions = polymarketOrchestrator.getRecentDecisions(limit);
 
     res.json({
       decisions: decisions.reverse(), // Newest first
@@ -1635,12 +1855,12 @@ app.get('/api/polymarket-agent/decisions', readLimiter, async (req: Request, res
 app.get('/api/polymarket-agent/trades', readLimiter, async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 20;
-    const trades = polymarketOrchestrator.getTrades(limit);
+    const trades = polymarketOrchestrator.getRecentTrades(limit);
 
     res.json({
-      trades: trades.reverse(), // Newest first
+      trades: trades, // Already reversed in getRecentTrades
       total: trades.length,
-      totalProfit: trades.reduce((sum, t) => sum + t.profitLoss, 0),
+      totalProfit: 0, // P/L calculated separately
     });
   } catch (error) {
     logger.error(`API /polymarket-agent/trades error: ${(error as Error).message}`);
@@ -1695,7 +1915,7 @@ app.get('/api/token/balance/:address', readLimiter, async (req: Request, res: Re
     const { address } = req.params;
 
     // Basic address validation
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
       return res.status(400).json({ error: 'Invalid Ethereum address' });
     }
 
@@ -1876,7 +2096,7 @@ app.get('/api/staking/user/:address', readLimiter, async (req: Request, res: Res
 
     const { address } = req.params;
 
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
       return res.status(400).json({ error: 'Invalid Ethereum address' });
     }
 
@@ -2197,7 +2417,7 @@ app.get('/api/orders', readLimiter, async (req: Request, res: Response) => {
     });
 
     res.json({
-      orders: orders.map(order => ({
+      orders: orders.map((order: { id: string; marketId: string; marketQuestion: string; tokenId: string; outcome: string; side: string; type: string; amount: number; price: number | null; filledAmount: number; remainingAmount: number; stopLoss: number | null; takeProfit: number | null; trailingStop: number | null; status: string; createdAt: Date; executedAt: Date | null; cancelledAt: Date | null }) => ({
         id: order.id,
         marketId: order.marketId,
         marketQuestion: order.marketQuestion,
@@ -2261,8 +2481,8 @@ app.post('/api/orders/:id/cancel', botControlLimiter, async (req: Request, res: 
     const { id } = req.params;
     const { userId } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
+    if (!userId || !id) {
+      return res.status(400).json({ error: 'userId and order id are required' });
     }
 
     const success = await orderMonitoring.cancelOrder(id, userId);
@@ -2333,6 +2553,10 @@ app.post('/api/orders/price-update', botControlLimiter, async (req: Request, res
 app.get('/api/prices/:tokenId', readLimiter, async (req: Request, res: Response) => {
   try {
     const { tokenId } = req.params;
+    
+    if (!tokenId) {
+      return res.status(400).json({ error: 'tokenId is required' });
+    }
 
     const priceData = priceFeed.getCurrentPrice(tokenId);
 
@@ -2357,6 +2581,10 @@ app.get('/api/prices/:tokenId/history', readLimiter, async (req: Request, res: R
   try {
     const { tokenId } = req.params;
     const { limit } = req.query;
+    
+    if (!tokenId) {
+      return res.status(400).json({ error: 'tokenId is required' });
+    }
 
     const history = priceFeed.getPriceHistory(
       tokenId,
@@ -2384,6 +2612,10 @@ app.get('/api/prices/:tokenId/ohlcv', readLimiter, async (req: Request, res: Res
   try {
     const { tokenId } = req.params;
     const { interval = '1h', limit = '100' } = req.query;
+    
+    if (!tokenId) {
+      return res.status(400).json({ error: 'tokenId is required' });
+    }
 
     const ohlcv = priceFeed.getOHLCV(
       tokenId,

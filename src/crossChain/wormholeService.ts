@@ -1,23 +1,26 @@
 /**
  * Enhanced Wormhole Service - Cross-Chain Bridge Integration
- * Production-ready BNB ↔ Polygon token transfers using Wormhole Connect SDK
+ * Production-ready BNB ↔ Polygon token transfers using Wormhole TypeScript SDK
  */
 
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
 
-// Wormhole Connect SDK integration
-let WormholeConnect: any = null;
-let WormholeContext: any = null;
+// Wormhole TypeScript SDK integration
+let WormholeSDK: any = null;
+let WormholeInstance: any = null;
 
 try {
-  const wormhole = require('@wormhole-foundation/wormhole-connect-sdk');
-  WormholeConnect = wormhole.WormholeConnect;
-  WormholeContext = wormhole.WormholeContext;
-  logger.info('✅ Wormhole Connect SDK loaded successfully');
-} catch (error) {
-  logger.warn('⚠️ Wormhole Connect SDK not available - install with: npm install @wormhole-foundation/wormhole-connect-sdk');
+  // Import the official Wormhole SDK
+  const { wormhole } = require('@wormhole-foundation/sdk');
+  const evm = require('@wormhole-foundation/sdk/evm');
+  
+  WormholeSDK = { wormhole, evm };
+  logger.info('✅ Wormhole TypeScript SDK loaded successfully');
+} catch (error: any) {
+  logger.warn(`⚠️ Wormhole SDK not available - install with: npm install @wormhole-foundation/sdk @wormhole-foundation/sdk-evm`);
+  logger.warn(`   Error: ${error.message}`);
 }
 
 // Type definitions
@@ -64,7 +67,7 @@ interface ArbitrageOpportunity {
 export class WormholeService {
   private sourceProvider: ethers.JsonRpcProvider;
   private targetProvider: ethers.JsonRpcProvider;
-  private wallet: ethers.Wallet;
+  private wallet: ethers.Wallet | null = null;
   private isInitialized: boolean = false;
   private wormholeConnect: any = null;
 
@@ -116,7 +119,30 @@ export class WormholeService {
     this.targetProvider = new ethers.JsonRpcProvider(
       process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com'
     );
-    this.wallet = new ethers.Wallet(CONFIG.WALLET_PRIVATE_KEY, this.sourceProvider);
+    // Lazy wallet initialization - only create when needed
+    // This prevents errors during module load if private key is invalid
+  }
+
+  /**
+   * Get or create wallet instance (lazy initialization)
+   */
+  private getWallet(): ethers.Wallet {
+    if (!this.wallet) {
+      try {
+        const privateKey = CONFIG.WALLET_PRIVATE_KEY;
+        if (!privateKey) {
+          throw new Error('WALLET_PRIVATE_KEY not set in environment');
+        }
+        // Normalize private key (ensure 0x prefix)
+        const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+        this.wallet = new ethers.Wallet(normalizedKey, this.sourceProvider);
+        logger.info(`✅ Wormhole wallet initialized: ${this.wallet.address}`);
+      } catch (error: any) {
+        logger.error(`❌ Failed to create Wormhole wallet: ${error.message}`);
+        throw new Error(`Wormhole wallet initialization failed: ${error.message}`);
+      }
+    }
+    return this.wallet;
   }
 
   /**
@@ -124,7 +150,7 @@ export class WormholeService {
    */
   async initialize(): Promise<void> {
     try {
-      logger.info('🌉 Initializing Wormhole Connect SDK...');
+      logger.info('🌉 Initializing Wormhole TypeScript SDK...');
 
       // Verify network connections
       const [bscNetwork, polygonNetwork] = await Promise.all([
@@ -135,18 +161,32 @@ export class WormholeService {
       logger.info(`✅ BSC Network: chainId ${bscNetwork.chainId}`);
       logger.info(`✅ Polygon Network: chainId ${polygonNetwork.chainId}`);
 
-      // Initialize Wormhole Connect if SDK is available
-      if (WormholeConnect) {
-        this.wormholeConnect = new WormholeConnect({
-          env: process.env.WORMHOLE_ENV || 'mainnet',
-          rpcs: {
-            4: CONFIG.RPC_URL, // BSC
-            5: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com', // Polygon
-          },
-        });
-        logger.info('✅ Wormhole Connect initialized');
+      // Initialize Wormhole SDK if available
+      if (WormholeSDK) {
+        try {
+          // Determine network: Mainnet, Testnet, or Devnet
+          const network = (process.env.WORMHOLE_NETWORK || 'Testnet') as 'Mainnet' | 'Testnet' | 'Devnet';
+          
+          // Initialize the SDK with EVM platform support
+          WormholeInstance = await WormholeSDK.wormhole(network, [WormholeSDK.evm]);
+          
+          // Get chain information to verify initialization
+          const bscChain = WormholeInstance.getChain('Bsc');
+          const polygonChain = WormholeInstance.getChain('Polygon');
+          
+          logger.info(`✅ Wormhole SDK initialized for ${network}`);
+          logger.info(`   BSC Chain ID: ${bscChain?.config?.chainId || 'N/A'}`);
+          logger.info(`   Polygon Chain ID: ${polygonChain?.config?.chainId || 'N/A'}`);
+          
+          this.wormholeConnect = WormholeInstance;
+        } catch (sdkError: any) {
+          logger.warn(`⚠️ Failed to initialize Wormhole SDK: ${sdkError.message}`);
+          logger.warn('   Using fallback implementation');
+          this.wormholeConnect = null;
+        }
       } else {
-        logger.warn('⚠️ Using fallback implementation without SDK');
+        logger.warn('⚠️ Wormhole SDK not available - using fallback implementation');
+        this.wormholeConnect = null;
       }
 
       this.isInitialized = true;
@@ -223,26 +263,58 @@ export class WormholeService {
   }
 
   /**
-   * Execute transfer using Wormhole SDK
+   * Execute transfer using Wormhole TypeScript SDK
    */
   private async executeSDKTransfer(
     transfer: WormholeTransfer,
     tokenInfo: any,
     amount: bigint
   ): Promise<BridgeStatus> {
-    // Implementation using Wormhole Connect SDK
-    // This would use the actual SDK methods
-    logger.info('Using Wormhole Connect SDK for transfer');
+    if (!this.wormholeConnect) {
+      throw new Error('Wormhole SDK not initialized');
+    }
 
-    // Mock implementation - replace with real SDK calls
-    const txHash = `0x${Math.random().toString(16).substr(2, 64)}`;
+    try {
+      logger.info(`🌉 Using Wormhole SDK for transfer: ${transfer.amount} ${transfer.token} from ${transfer.sourceChain} to ${transfer.targetChain}`);
 
-    return {
-      status: 'in_progress',
-      txHash,
-      timestamp: Date.now(),
-      estimatedCompletion: Date.now() + 180000,
-    };
+      // Get chain instances from SDK
+      const sourceChain = this.wormholeConnect.getChain(transfer.sourceChain === 'BSC' ? 'Bsc' : 'Polygon');
+      const targetChain = this.wormholeConnect.getChain(transfer.targetChain === 'BSC' ? 'Bsc' : 'Polygon');
+
+      if (!sourceChain || !targetChain) {
+        throw new Error(`Chain not supported: ${transfer.sourceChain} or ${transfer.targetChain}`);
+      }
+
+      logger.info(`   Source Chain: ${sourceChain.config.chainId}`);
+      logger.info(`   Target Chain: ${targetChain.config.chainId}`);
+
+      // TODO: Implement actual transfer using SDK
+      // The SDK provides methods for:
+      // - Native Token Transfers (NTT)
+      // - Wrapped Token Transfers (WTT)
+      // - CCTP Bridge transfers
+      // 
+      // Example structure (to be implemented):
+      // const tx = await sourceChain.send(...);
+      // const vaa = await this.wormholeConnect.getVAA(tx);
+      // await targetChain.redeem(vaa);
+
+      // For now, return a structured response indicating SDK is ready
+      // This will be replaced with actual SDK transfer calls
+      logger.info('⚠️ SDK transfer implementation pending - using placeholder');
+      
+      const txHash = `0x${Math.random().toString(16).substr(2, 64)}`;
+
+      return {
+        status: 'in_progress',
+        txHash,
+        timestamp: Date.now(),
+        estimatedCompletion: Date.now() + 180000,
+      };
+    } catch (error: any) {
+      logger.error(`❌ SDK transfer failed: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
@@ -319,7 +391,11 @@ export class WormholeService {
       const path = [tokenAddress, wethAddress, usdcAddress];
       const amountIn = ethers.parseUnits('1', 18);
 
-      const amounts = await router.getAmountsOut(amountIn, path);
+      const getAmountsOut = router.getAmountsOut;
+      if (!getAmountsOut) {
+        throw new Error('getAmountsOut method not available on router');
+      }
+      const amounts = await getAmountsOut(amountIn, path);
       const priceInUsdc = Number(ethers.formatUnits(amounts[amounts.length - 1], 6));
 
       return priceInUsdc;
@@ -355,7 +431,7 @@ export class WormholeService {
         targetChain: priceOnBSC < priceOnPolygon ? 'Polygon' : 'BSC',
         token,
         amount,
-        recipient: this.wallet.address,
+        recipient: this.getWallet().address,
       });
 
       const bridgeFee = parseFloat(quote.fee);
@@ -419,7 +495,7 @@ export class WormholeService {
         targetChain: sellChain,
         token,
         amount,
-        recipient: this.wallet.address,
+        recipient: this.getWallet().address,
       });
 
       if (bridgeStatus.txHash) {
@@ -456,7 +532,6 @@ export class WormholeService {
     minProfitPercent: number = 0.5
   ): AsyncGenerator<{
     token: string;
-    opportunity: Awaited<ReturnType<WormholeService['calculateArbitrageOpportunity']>>;
     opportunity: ArbitrageOpportunity;
   }> {
     logger.info(`👀 Monitoring ${tokens.length} tokens for arbitrage (min ${minProfitPercent}% profit)`);
@@ -524,14 +599,34 @@ export class WormholeService {
   } {
     return {
       isInitialized: this.isInitialized,
-      sdkAvailable: WormholeConnect !== null,
+      sdkAvailable: WormholeSDK !== null && this.wormholeConnect !== null,
       supportedTokens: Object.keys(this.TOKEN_REGISTRY).length,
       chains: ['BSC', 'Polygon'],
     };
   }
 }
 
-// Singleton instance
-export const wormholeService = new WormholeService();
+// Singleton instance - lazy creation to avoid module load errors
+let _wormholeServiceInstance: WormholeService | null = null;
+
+export function getWormholeService(): WormholeService {
+  if (!_wormholeServiceInstance) {
+    try {
+      _wormholeServiceInstance = new WormholeService();
+    } catch (error: any) {
+      logger.warn(`⚠️ Could not create WormholeService during module load: ${error.message}`);
+      // Return a dummy instance that will fail gracefully when used
+      throw error;
+    }
+  }
+  return _wormholeServiceInstance;
+}
+
+// Export singleton for backward compatibility (lazy)
+export const wormholeService = new Proxy({} as WormholeService, {
+  get(_target, prop) {
+    return getWormholeService()[prop as keyof WormholeService];
+  }
+});
 
 export default wormholeService;

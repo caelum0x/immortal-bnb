@@ -69,10 +69,15 @@ export default function SettingsPage() {
 
   const loadSettings = async () => {
     try {
-      const response = await fetch('/api/settings')
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_URL}/api/settings`)
       if (response.ok) {
         const data = await response.json()
-        setSettings(data.settings)
+        // Backend returns settings directly or wrapped in settings property
+        const loadedSettings = data.settings || data
+        if (loadedSettings && typeof loadedSettings === 'object') {
+          setSettings(prev => ({ ...prev, ...loadedSettings }))
+        }
       }
     } catch (error) {
       console.error('Failed to load settings:', error)
@@ -84,21 +89,24 @@ export default function SettingsPage() {
       setLoading(true)
       setSaveMessage('')
 
-      const response = await fetch('/api/settings', {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_URL}/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings }),
       })
 
       if (response.ok) {
-        setSaveMessage('Settings saved successfully!')
+        const data = await response.json()
+        setSaveMessage(data.message || 'Settings saved successfully!')
         setTimeout(() => setSaveMessage(''), 3000)
       } else {
-        setSaveMessage('Failed to save settings')
+        const errorData = await response.json().catch(() => ({}))
+        setSaveMessage(errorData.error || 'Failed to save settings')
       }
     } catch (error) {
       console.error('Failed to save settings:', error)
-      setSaveMessage('Error saving settings')
+      setSaveMessage('Error saving settings: ' + (error instanceof Error ? error.message : 'Unknown error'))
     } finally {
       setLoading(false)
     }
