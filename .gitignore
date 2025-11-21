@@ -13,11 +13,21 @@ dist/
 build/
 *.tsbuildinfo
 
-# Environment variables
+# Environment variables - secure all .env files
 .env
+.env.*
 .env.local
+.env.*.local
+.env.development
 .env.production
+.env.staging
 .env.test
+.env.development.local
+.env.production.local
+.env.test.local
+# Allow .env.example files (commonly used as templates)
+!.env.example
+!.env*.example
 
 # IDEs
 .vscode/
